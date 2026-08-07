@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberTrain - Security Training Platform</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Language Selector -->
+    <div class="language-selector">
+        <button onclick="changeLanguage('en')" class="lang-btn active" data-lang="en">English</button>
+        <button onclick="changeLanguage('ar')" class="lang-btn" data-lang="ar">العربية</button>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="logo"> CyberTrain</h1>
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="#home" onclick="showPage('home')">Home</a></li>
+                <li><a href="#login" onclick="showPage('login')">Login</a></li>
+                <li><a href="#register" onclick="showPage('register')">Register</a></li>
+                <li id="adminLink" style="display:none;"><a href="#admin" onclick="showPage('admin')">Admin</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Home Page -->
+    <div id="home" class="page active">
+        <div class="hero-section">
+            <div class="hero-content">
+                <h2 data-i18n="hero_title">Protect Your Organization from Email Spoofing</h2>
+                <p data-i18n="hero_subtitle">Learn cybersecurity through interactive training and real-world scenarios</p>
+                <button onclick="showPage('login')" class="btn btn-primary" data-i18n="get_started">Get Started</button>
+            </div>
+            <div class="hero-animation">
+                <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Computer -->
+                    <rect x="100" y="80" width="200" height="140" fill="none" stroke="#ff4444" stroke-width="2" rx="10"/>
+                    <rect x="110" y="90" width="180" height="110" fill="#1a1a1a" stroke="#ff4444" stroke-width="2"/>
+                    <rect x="130" y="220" width="140" height="10" fill="#ff4444"/>
+                    
+                    <!-- Keyboard -->
+                    <g id="keyboard">
+                        <rect x="100" y="240" width="200" height="30" fill="#222" stroke="#ff4444" stroke-width="2" rx="5"/>
+                        <circle class="key" cx="120" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="140" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="160" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="180" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="200" cy="255" r="4" fill="#ff4444"/>
+                    </g>
+
+                    <!-- Stick Man -->
+                    <circle cx="50" cy="100" r="12" stroke="#00ff88" stroke-width="2" fill="none"/>
+                    <line x1="50" y1="112" x2="50" y2="150" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="125" x2="30" y2="140" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="125" x2="70" y2="140" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="150" x2="35" y2="180" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="150" x2="65" y2="180" stroke="#00ff88" stroke-width="2"/>
+
+                    <!-- Floating text -->
+                    <text x="250" y="130" font-size="14" fill="#ff4444" class="float-text">Phishing</text>
+                    <text x="280" y="160" font-size="14" fill="#ff4444" class="float-text">Spoofing</text>
+                    <text x="240" y="190" font-size="14" fill="#ff4444" class="float-text">Threats</text>
+                </svg>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <h3> Email Analysis</h3>
+                <p data-i18n="feature_email">Analyze suspicious emails for spoofing and phishing patterns</p>
+            </div>
+            <div class="feature-card">
+                <h3> Training Platform</h3>
+                <p data-i18n="feature_training">Learn cybersecurity concepts with interactive scenarios</p>
+            </div>
+            <div class="feature-card">
+                <h3> 5-Level Exams</h3>
+                <p data-i18n="feature_exam">Test your knowledge with 150 questions across 5 difficulty levels</p>
+            </div>
+            <div class="feature-card">
+                <h3> Admin Dashboard</h3>
+                <p data-i18n="feature_admin">Monitor employee progress and exam results</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Page -->
+    <div id="login" class="page">
+        <div class="auth-container">
+            <div class="auth-box">
+                <h2 data-i18n="login_title">Employee Login</h2>
+                <form onsubmit="handleLogin(event)">
+                    <input type="text" id="loginUsername" placeholder="Username" required data-i18n-placeholder="username">
+                    <input type="password" id="loginPassword" placeholder="Password" required data-i18n-placeholder="password">
+                    <button type="submit" class="btn btn-primary" data-i18n="login_button">Login</button>
+                </form>
+                <p data-i18n="no_account">Don't have an account? <a href="#" onclick="showPage('register')">Register here</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Register Page -->
+    <div id="register" class="page">
+        <div class="auth-container">
+            <div class="auth-box">
+                <h2 data-i18n="register_title">Create Account</h2>
+                <form onsubmit="handleRegister(event)">
+                    <input type="text" id="regUsername" placeholder="Username" required data-i18n-placeholder="username">
+                    <input type="password" id="regPassword" placeholder="Password" required data-i18n-placeholder="password">
+                    <button type="submit" class="btn btn-primary" data-i18n="register_button">Register</button>
+                </form>
+                <p data-i18n="have_account">Already have an account? <a href="#" onclick="showPage('login')">Login here</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Page -->
+    <div id="dashboard" class="page">
+        <div class="dashboard-container">
+            <h2 data-i18n="welcome">Welcome, <span id="userDisplay">User</span>!</h2>
+            
+            <div class="dashboard-menu">
+                <button onclick="showSection('email-checker')" class="menu-btn" data-i18n="email_checker"> Email Checker</button>
+                <button onclick="showSection('training')" class="menu-btn" data-i18n="training"> Training</button>
+                <button onclick="showSection('exams')" class="menu-btn" data-i18n="exams"> Exams</button>
+                <button onclick="showSection('results')" class="menu-btn" data-i18n="my_results"> My Results</button>
+                <button onclick="logout()" class="menu-btn" data-i18n="logout">🚪 Logout</button>
+            </div>
+
+            <!-- Email Checker Section -->
+            <div id="email-checker" class="section hidden">
+                <h3 data-i18n="email_analysis">Email Analysis Tool</h3>
+                <div class="tool-box">
+                    <label data-i18n="sender_email">Sender Email:</label>
+                    <input type="email" id="senderEmail" placeholder="user@company.com">
+                    
+                    <label data-i18n="email_subject">Subject:</label>
+                    <input type="text" id="emailSubject" placeholder="Email subject">
+                    
+                    <label data-i18n="email_body">Email Body:</label>
+                    <textarea id="emailBody" placeholder="Paste email content here..."></textarea>
+                    
+                    <button onclick="analyzeEmail()" class="btn btn-primary" data-i18n="analyze">Analyze</button>
+                </div>
+                <div id="emailResult" class="result-box hidden"></div>
+            </div>
+
+            <!-- Training Section -->
+            <div id="training" class="section hidden">
+                <h3 data-i18n="training_platform">Training Platform</h3>
+                <div class="training-box">
+                    <div class="training-content">
+                        <h4 data-i18n="learning_modules">Learning Modules</h4>
+                        <ul>
+                            <li><a href="#" onclick="showTrainingModule('cia')"> CIA Triad (Confidentiality, Integrity, Availability)</a></li>
+                            <li><a href="#" onclick="showTrainingModule('networks')">🌐 Network Security & Protocols</a></li>
+                            <li><a href="#" onclick="showTrainingModule('os')">💻 Operating Systems Security</a></li>
+                            <li><a href="#" onclick="showTrainingModule('spoofing_theory')">📖 Email Spoofing Theory</a></li>
+                            <li><a href="#" onclick="showSpoofingScenarios()"> Email Spoofing Scenarios (50 Training Cases)</a></li>
+                        </ul>
+                    </div>
+                    <div id="trainingModule" class="training-module hidden"></div>
+                    <div id="scenariosContainer" class="training-module hidden"></div>
+                </div>
+            </div>
+
+            <!-- Exams Section -->
+            <div id="exams" class="section hidden">
+                <h3 data-i18n="exams">Exams</h3>
+                <div class="exams-grid">
+                    <button onclick="startExam('beginner')" class="exam-card">
+                        <h4> Beginner</h4>
+                        <p data-i18n="general_security">General Security (30 questions)</p>
+                    </button>
+                    <button onclick="startExam('easy')" class="exam-card">
+                        <h4> Easy</h4>
+                        <p data-i18n="cia_triad">CIA Triad (30 questions)</p>
+                    </button>
+                    <button onclick="startExam('medium')" class="exam-card">
+                        <h4> Medium</h4>
+                        <p data-i18n="networks">Networks (30 questions)</p>
+                    </button>
+                    <button onclick="startExam('hard')" class="exam-card">
+                        <h4> Hard</h4>
+                        <p data-i18n="protocols">Protocols (30 questions)</p>
+                    </button>
+                    <button onclick="startExam('advanced')" class="exam-card">
+                        <h4>⚫ Advanced</h4>
+                        <p data-i18n="operating_systems">Operating Systems (30 questions)</p>
+                    </button>
+                    <button onclick="startExam('spoofing')" class="exam-card">
+                        <h4> Email Spoofing</h4>
+                        <p data-i18n="spoofing_scenarios">50 Real Scenarios</p>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="results" class="section hidden">
+                <h3 data-i18n="my_results">My Results</h3>
+                <div id="resultsList" class="results-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exam Page -->
+    <div id="exam-page" class="page">
+        <div class="exam-container">
+            <div class="exam-header">
+                <h2 id="examTitle"></h2>
+                <div class="exam-progress">
+                    <span id="questionCounter"></span>
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="exam-content">
+                <h3 id="questionText"></h3>
+                <div id="answersContainer" class="answers-container"></div>
+                <button onclick="nextQuestion()" class="btn btn-primary" data-i18n="next">Next</button>
+                <button onclick="finishExam()" class="btn btn-danger" data-i18n="finish">Finish Exam</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Page -->
+    <div id="admin" class="page">
+        <div class="admin-container">
+            <h2 data-i18n="admin_login">Admin Login</h2>
+            <form onsubmit="handleAdminLogin(event)">
+                <input type="text" id="adminUser" placeholder="Admin Username" required>
+                <input type="password" id="adminPass" placeholder="Admin Password" required>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard with Full Access -->
+    <div id="admin-dashboard" class="page">
+        <div class="admin-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h2 data-i18n="admin_dashboard"> Admin Panel</h2>
+                <button onclick="logout()" class="btn btn-danger" data-i18n="logout">Logout</button>
+            </div>
+            
+            <!-- Admin Tabs Navigation -->
+            <div class="admin-tabs-nav" style="display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 2px solid #ff4444; padding-bottom: 1rem;">
+                <button onclick="switchAdminTab('dashboard')" class="admin-tab-btn active" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #00ff88; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Dashboard</button>
+                <button onclick="switchAdminTab('exams')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Exams</button>
+                <button onclick="switchAdminTab('training')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Training</button>
+            </div>
+            
+            <!-- Dashboard Tab Content -->
+            <div id="tab-dashboard" class="admin-tab-content">
+                <div class="admin-stats">
+                    <div class="stat-card">
+                        <h3 id="totalUsers">0</h3>
+                        <p data-i18n="total_users">Total Users</p>
+                    </div>
+                </div>
+                <h3 style="margin-top: 2rem;">Recent Exam Results</h3>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="username">Username</th>
+                            <th data-i18n="exam_type">Exam Type</th>
+                            <th data-i18n="level">Level</th>
+                            <th data-i18n="score">Score</th>
+                            <th data-i18n="date">Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsTableBody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Exams Tab Content -->
+            <div id="tab-exams" class="admin-tab-content" style="display: none;">
+                <h3> Available Exams</h3>
+                <div id="adminExamsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;"></div>
+            </div>
+            
+            <!-- Training Tab Content -->
+            <div id="tab-training" class="admin-tab-content" style="display: none;">
+                <h3> Training Modules</h3>
+                <div id="adminTrainingContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='translations.js') }}"></script>
+    <script src="{{ url_for('static', filename='data.js') }}"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
