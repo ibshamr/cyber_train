@@ -200,6 +200,12 @@ class ComprehensiveEmailAnalyzer:
             'findings': {},
             'risk_assessment': {}
         }
+
+        if not OTX_KEY:
+            api_data['status'] = 'not_configured'
+            api_data['error'] = 'OTX_KEY is not set in .env - this check was skipped'
+            self.report['api_1_otx'] = api_data
+            return api_data
         
         try:
             headers = {'X-OTX-API-KEY': OTX_KEY}
@@ -278,6 +284,12 @@ class ComprehensiveEmailAnalyzer:
         if len(urls) == 0:
             api_data['status'] = 'no_urls'
             api_data['message'] = 'No URLs found in email body'
+            self.report['api_2_virustotal'] = api_data
+            return api_data
+
+        if not VIRUSTOTAL_KEY:
+            api_data['status'] = 'not_configured'
+            api_data['error'] = 'VIRUSTOTAL_KEY is not set in .env - this check was skipped'
             self.report['api_2_virustotal'] = api_data
             return api_data
         
@@ -386,25 +398,42 @@ class ComprehensiveEmailAnalyzer:
             'domain': domain,
             'checks': {}
         }
+
+        if not MXTOOLBOX_KEY:
+            api_data['status'] = 'not_configured'
+            api_data['error'] = 'MXTOOLBOX_KEY is not set in .env - this check was skipped'
+            self.report['api_3_mxtoolbox'] = api_data
+            return api_data
         
         try:
-            base_url = 'https://api.mxtoolbox.com/api/v1'
+            # MXToolbox's real Lookup API is path-based, e.g.
+            #   GET https://mxtoolbox.com/api/v1/lookup/{command}/{argument}
+            # authenticated with an "Authorization" header carrying the raw
+            # key (no query-string apikey, no "Bearer" prefix). The response
+            # is a report object with Passed / Failed / Warnings / Errors
+            # arrays rather than a simple {status: "valid"} field.
+            base_url = 'https://mxtoolbox.com/api/v1/lookup'
+            headers = {'Authorization': MXTOOLBOX_KEY}
+
+            def run_lookup(command, argument):
+                return requests.get(
+                    base_url + '/' + command + '/' + argument,
+                    headers=headers,
+                    timeout=10
+                )
             
             # SPF Check
             print("  Checking SPF Records...")
             spf_check = {'check': 'SPF', 'status': 'pending'}
             try:
-                spf_response = requests.get(
-                    base_url + '/spf/' + domain,
-                    params={'apikey': MXTOOLBOX_KEY},
-                    timeout=10
-                )
+                spf_response = run_lookup('spf', domain)
                 
                 if spf_response.status_code == 200:
                     spf_data = spf_response.json()
-                    spf_valid = spf_data.get('status') == 'valid'
+                    spf_failed = len(spf_data.get('Failed', [])) > 0 or spf_data.get('IsError', False)
+                    spf_valid = not spf_failed and len(spf_data.get('Passed', [])) > 0
                     spf_check['status'] = 'completed'
-                    spf_check['result'] = spf_data.get('status', 'unknown')
+                    spf_check['result'] = 'valid' if spf_valid else ('failed' if spf_failed else 'no_record')
                     spf_check['valid'] = spf_valid
                     spf_check['interpretation'] = 'SPF record is VALID - Sender domain can be verified' if spf_valid else 'SPF record is MISSING or INVALID - Domain can be spoofed'
                     
@@ -412,7 +441,7 @@ class ComprehensiveEmailAnalyzer:
                         spf_check['risk_points'] = 15
                         self.risk_score += 15
                     
-                    print("    SPF: " + spf_data.get('status', 'unknown'))
+                    print("    SPF: " + spf_check['result'])
                 else:
                     spf_check['status'] = 'error'
                     spf_check['error'] = 'HTTP ' + str(spf_response.status_code)
@@ -426,17 +455,14 @@ class ComprehensiveEmailAnalyzer:
             print("  Checking DMARC Policy...")
             dmarc_check = {'check': 'DMARC', 'status': 'pending'}
             try:
-                dmarc_response = requests.get(
-                    base_url + '/dmarc/' + domain,
-                    params={'apikey': MXTOOLBOX_KEY},
-                    timeout=10
-                )
+                dmarc_response = run_lookup('dmarc', domain)
                 
                 if dmarc_response.status_code == 200:
                     dmarc_data = dmarc_response.json()
-                    dmarc_valid = dmarc_data.get('status') == 'valid'
+                    dmarc_failed = len(dmarc_data.get('Failed', [])) > 0 or dmarc_data.get('IsError', False)
+                    dmarc_valid = not dmarc_failed and len(dmarc_data.get('Passed', [])) > 0
                     dmarc_check['status'] = 'completed'
-                    dmarc_check['result'] = dmarc_data.get('status', 'unknown')
+                    dmarc_check['result'] = 'valid' if dmarc_valid else ('failed' if dmarc_failed else 'no_record')
                     dmarc_check['valid'] = dmarc_valid
                     dmarc_check['interpretation'] = 'DMARC policy is VALID - Domain has strong authentication' if dmarc_valid else 'DMARC policy is MISSING or WEAK - Domain lacks proper authentication'
                     
@@ -444,7 +470,7 @@ class ComprehensiveEmailAnalyzer:
                         dmarc_check['risk_points'] = 15
                         self.risk_score += 15
                     
-                    print("    DMARC: " + dmarc_data.get('status', 'unknown'))
+                    print("    DMARC: " + dmarc_check['result'])
                 else:
                     dmarc_check['status'] = 'error'
                     dmarc_check['error'] = 'HTTP ' + str(dmarc_response.status_code)
@@ -458,18 +484,14 @@ class ComprehensiveEmailAnalyzer:
             print("  Checking MX Records...")
             mx_check = {'check': 'MX Records', 'status': 'pending'}
             try:
-                mx_response = requests.get(
-                    base_url + '/mxlookup/' + domain,
-                    params={'apikey': MXTOOLBOX_KEY},
-                    timeout=10
-                )
+                mx_response = run_lookup('mx', domain)
                 
                 if mx_response.status_code == 200:
                     mx_data = mx_response.json()
-                    mx_records = mx_data.get('result', [])
+                    mx_records = mx_data.get('Passed', [])
                     mx_check['status'] = 'completed'
                     mx_check['records_found'] = len(mx_records)
-                    mx_check['records'] = mx_records[:3] if mx_records else []
+                    mx_check['records'] = [r.get('Name') or r.get('Info') for r in mx_records[:3]]
                     mx_check['interpretation'] = str(len(mx_records)) + ' MX record(s) found - Domain can receive emails' if mx_records else 'NO MX RECORDS - Domain cannot receive legitimate emails'
                     
                     if len(mx_records) == 0:

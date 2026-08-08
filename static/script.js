@@ -283,12 +283,16 @@ function displayEmailAnalysis(analysis) {
         `);
     } else if (otx.status === 'error') {
         html += reportSection('Domain Reputation (OTX AlienVault)', `<p>Check failed: ${escapeHtml(otx.error)}</p>`);
+    } else if (otx.status === 'not_configured') {
+        html += reportSection('Domain Reputation (OTX AlienVault)', `<p>Skipped — ${escapeHtml(otx.error)}</p>`);
     }
 
     // ---- 4. URL scanning (VirusTotal) ----
     const vt = analysis.api_2_virustotal || {};
     if (vt.status === 'no_urls') {
         html += reportSection('URL Scanning (VirusTotal)', `<p>No links found in the email body.</p>`);
+    } else if (vt.status === 'not_configured') {
+        html += reportSection('URL Scanning (VirusTotal)', `<p>Skipped — ${escapeHtml(vt.error)}</p>`);
     } else if (vt.urls_analysis && vt.urls_analysis.length > 0) {
         let urlsHtml = '<ul style="margin-left: 20px;">';
         vt.urls_analysis.forEach(u => {
@@ -314,14 +318,22 @@ function displayEmailAnalysis(analysis) {
             if (check.status === 'error') return `<li><strong>${escapeHtml(check.check)}:</strong> check failed - ${escapeHtml(check.error)}</li>`;
             return `<li><strong>${escapeHtml(check.check)}:</strong> ${escapeHtml(check.result)} — ${escapeHtml(check.interpretation)}</li>`;
         };
+        const mxLine = () => {
+            const mr = c.mx_records;
+            if (!mr) return '<li>MX Records: not checked</li>';
+            if (mr.status === 'error') return `<li><strong>MX Records:</strong> check failed - ${escapeHtml(mr.error)}</li>`;
+            return `<li><strong>MX Records:</strong> ${escapeHtml(String(mr.records_found))} found — ${escapeHtml(mr.interpretation)}</li>`;
+        };
         html += reportSection('Email Authentication (SPF / DMARC / MX)', `
             <ul style="margin-left: 20px;">
                 ${line(c.spf)}
                 ${line(c.dmarc)}
-                ${c.mx_records ? `<li><strong>MX Records:</strong> ${escapeHtml(String(c.mx_records.records_found))} found — ${escapeHtml(c.mx_records.interpretation)}</li>` : '<li>MX Records: not checked</li>'}
+                ${mxLine()}
             </ul>
             <p style="margin-top: 0.5rem;"><strong>Email Health Score:</strong> ${escapeHtml(String(mx.email_health_score))}/100 (${escapeHtml(mx.email_health_assessment)})</p>
         `);
+    } else if (mx.status === 'not_configured') {
+        html += reportSection('Email Authentication (SPF / DMARC / MX)', `<p>Skipped — ${escapeHtml(mx.error)}</p>`);
     } else if (mx.status === 'error') {
         html += reportSection('Email Authentication (SPF / DMARC / MX)', `<p>Check failed: ${escapeHtml(mx.error)}</p>`);
     }
