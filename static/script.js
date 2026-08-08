@@ -197,7 +197,7 @@ async function analyzeEmail() {
     const subject = document.getElementById('emailSubject').value;
     const body = document.getElementById('emailBody').value;
     
-    if (!sender || !body) {
+    if (!sender || !subject || !body) {
         alert('Please enter email sender and content');
         return;
     }
