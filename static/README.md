@@ -118,7 +118,7 @@ The server will start at **http://localhost:5000**
 
 - **150 Multiple Choice Questions** (5 levels × 30 questions each)
 - **50 Email Spoofing Scenarios** (40 spoofed, 10 legitimate)
-- **50 Training Cases** (email spoofing examples)
+- **48 Training Cases** (email spoofing examples)
 - **4 Training Modules** (CIA, Networks, OS, Spoofing)
 
 ## 🔐 Security Features

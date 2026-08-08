@@ -202,6 +202,10 @@ async function analyzeEmail() {
         return;
     }
     
+    const resultBox = document.getElementById('emailResult');
+    resultBox.innerHTML = '<p>Analyzing... this checks 3 external APIs and can take a few seconds.</p>';
+    resultBox.classList.remove('hidden');
+
     try {
         const response = await fetch('/api/check-email', {
             method: 'POST',
@@ -210,48 +214,144 @@ async function analyzeEmail() {
         });
         
         const analysis = await response.json();
+
+        if (!response.ok || analysis.error) {
+            resultBox.innerHTML = `<div class="result-detail"><strong>Error:</strong> ${escapeHtml(analysis.message || 'Analysis failed')}</div>`;
+            return;
+        }
+
         displayEmailAnalysis(analysis);
     } catch (err) {
         console.error('Email analysis error:', err);
-        alert('Error analyzing email: ' + err.message);
+        resultBox.innerHTML = `<div class="result-detail"><strong>Error:</strong> ${escapeHtml(err.message)}</div>`;
     }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+}
+
+// Builds one collapsible-looking section with a title and inner HTML body.
+function reportSection(title, innerHtml) {
+    return `
+        <div class="result-detail">
+            <h4 style="margin-bottom: 0.5rem;">${title}</h4>
+            ${innerHtml}
+        </div>
+    `;
 }
 
 function displayEmailAnalysis(analysis) {
     const resultBox = document.getElementById('emailResult');
-    
-    const riskClass = `risk-${analysis.risk_level.toLowerCase()}`;
-    let warningsHTML = '';
-    
-    if (analysis.warnings.length > 0) {
-        warningsHTML = '<ul style="margin-left: 20px;">';
-        analysis.warnings.forEach(warning => {
-            warningsHTML += `<li>${warning}</li>`;
-        });
-        warningsHTML += '</ul>';
-    } else {
-        warningsHTML = `<p>No suspicious patterns detected</p>`;
+
+    // The sender email address itself was invalid - nothing else was checked.
+    if (analysis.email_info && analysis.email_info.status === 'INVALID') {
+        resultBox.innerHTML = reportSection('Invalid Email', `<p>${escapeHtml(analysis.email_info.error)}</p>`);
+        resultBox.classList.remove('hidden');
+        return;
     }
-    
-    resultBox.innerHTML = `
-        <h4>Risk Analysis</h4>
-        <div class="result-detail">
-            <strong>Risk Level:</strong> <span class="${riskClass}">${analysis.risk_level.toUpperCase()}</span>
-        </div>
-        <div class="result-detail">
-            <strong>Warnings:</strong>
-            ${warningsHTML}
-        </div>
-        <div class="result-detail">
-            <strong>Details:</strong>
-            <p>Sender: ${analysis.details.sender}</p>
-            <p>Patterns Found: ${analysis.details.patterns_found}</p>
-            <p>Risk Score: ${analysis.details.risk_score}/100</p>
-        </div>
-    `;
-    
+
+    const assessment = analysis.overall_assessment || {};
+    const riskLevel = assessment.risk_level || analysis.risk_level || 'UNKNOWN';
+    const riskClass = `risk-${riskLevel.toLowerCase()}`;
+
+    let html = '';
+
+    // ---- 1. Overall verdict ----
+    html += reportSection('Overall Risk Assessment', `
+        <p><strong>Risk Level:</strong> <span class="${riskClass}">${escapeHtml(riskLevel)}</span> (${escapeHtml(String(assessment.risk_score ?? analysis.details?.risk_score ?? 0))}/100)</p>
+        ${assessment.summary ? `<p>${escapeHtml(assessment.summary)}</p>` : ''}
+        ${assessment.decision ? `<p><strong>Decision:</strong> ${escapeHtml(assessment.decision)}</p>` : ''}
+    `);
+
+    // ---- 2. Sender info ----
+    const info = analysis.email_info || {};
+    html += reportSection('Sender Information', `
+        <p><strong>Email:</strong> ${escapeHtml(info.full_email)}</p>
+        <p><strong>Domain:</strong> ${escapeHtml(info.domain)}</p>
+    `);
+
+    // ---- 3. Domain reputation (OTX) ----
+    const otx = analysis.api_1_otx || {};
+    if (otx.status === 'completed') {
+        const f = otx.findings || {};
+        html += reportSection('Domain Reputation (OTX AlienVault)', `
+            <p><strong>Reputation Score:</strong> ${escapeHtml(String(f.reputation_score))} — ${escapeHtml(f.reputation_interpretation)}</p>
+            <p><strong>Threat Intelligence Reports:</strong> ${escapeHtml(String(f.threat_pulses_count))} — ${escapeHtml(f.pulse_interpretation)}</p>
+        `);
+    } else if (otx.status === 'error') {
+        html += reportSection('Domain Reputation (OTX AlienVault)', `<p>Check failed: ${escapeHtml(otx.error)}</p>`);
+    }
+
+    // ---- 4. URL scanning (VirusTotal) ----
+    const vt = analysis.api_2_virustotal || {};
+    if (vt.status === 'no_urls') {
+        html += reportSection('URL Scanning (VirusTotal)', `<p>No links found in the email body.</p>`);
+    } else if (vt.urls_analysis && vt.urls_analysis.length > 0) {
+        let urlsHtml = '<ul style="margin-left: 20px;">';
+        vt.urls_analysis.forEach(u => {
+            if (u.status === 'completed') {
+                const s = u.scan_results || {};
+                urlsHtml += `<li><strong>${escapeHtml(u.url)}</strong> — ${escapeHtml(u.threat_level)} (${escapeHtml(String(s.malicious_vendors))} malicious / ${escapeHtml(String(s.suspicious_vendors))} suspicious / ${escapeHtml(String(s.total_vendors))} vendors checked)</li>`;
+            } else {
+                urlsHtml += `<li>${escapeHtml(u.url)} — check failed: ${escapeHtml(u.error || 'unknown error')}</li>`;
+            }
+        });
+        urlsHtml += '</ul>';
+        html += reportSection('URL Scanning (VirusTotal)', urlsHtml);
+    } else if (vt.status === 'error') {
+        html += reportSection('URL Scanning (VirusTotal)', `<p>Check failed: ${escapeHtml(vt.error)}</p>`);
+    }
+
+    // ---- 5. Email authentication: SPF / DMARC / MX ----
+    const mx = analysis.api_3_mxtoolbox || {};
+    if (mx.status === 'completed' && mx.checks) {
+        const c = mx.checks;
+        const line = (check) => {
+            if (!check) return '<li>Not checked</li>';
+            if (check.status === 'error') return `<li><strong>${escapeHtml(check.check)}:</strong> check failed - ${escapeHtml(check.error)}</li>`;
+            return `<li><strong>${escapeHtml(check.check)}:</strong> ${escapeHtml(check.result)} — ${escapeHtml(check.interpretation)}</li>`;
+        };
+        html += reportSection('Email Authentication (SPF / DMARC / MX)', `
+            <ul style="margin-left: 20px;">
+                ${line(c.spf)}
+                ${line(c.dmarc)}
+                ${c.mx_records ? `<li><strong>MX Records:</strong> ${escapeHtml(String(c.mx_records.records_found))} found — ${escapeHtml(c.mx_records.interpretation)}</li>` : '<li>MX Records: not checked</li>'}
+            </ul>
+            <p style="margin-top: 0.5rem;"><strong>Email Health Score:</strong> ${escapeHtml(String(mx.email_health_score))}/100 (${escapeHtml(mx.email_health_assessment)})</p>
+        `);
+    } else if (mx.status === 'error') {
+        html += reportSection('Email Authentication (SPF / DMARC / MX)', `<p>Check failed: ${escapeHtml(mx.error)}</p>`);
+    }
+
+    // ---- 6. Content pattern analysis ----
+    const patterns = (analysis.pattern_analysis || {}).patterns_found || {};
+    const patternLines = [];
+    if (patterns.urgency_keywords?.length) patternLines.push(`<li><strong>Urgency language:</strong> ${patterns.urgency_keywords.map(escapeHtml).join(', ')}</li>`);
+    if (patterns.generic_greetings?.length) patternLines.push(`<li><strong>Generic greetings:</strong> ${patterns.generic_greetings.map(escapeHtml).join(', ')}</li>`);
+    if (patterns.grammar_errors?.length) patternLines.push(`<li><strong>Grammar/spelling red flags:</strong> ${patterns.grammar_errors.map(escapeHtml).join(', ')}</li>`);
+    html += reportSection('Content Pattern Analysis', patternLines.length
+        ? `<ul style="margin-left: 20px;">${patternLines.join('')}</ul>`
+        : '<p>No suspicious wording patterns detected.</p>');
+
+    // ---- 7. All warnings, flattened ----
+    const warnings = analysis.warnings || [];
+    html += reportSection('All Warnings', warnings.length
+        ? `<ul style="margin-left: 20px;">${warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`
+        : '<p>No suspicious patterns detected.</p>');
+
+    // ---- 8. Recommendations ----
+    const recs = analysis.recommendations || [];
+    if (recs.length) {
+        html += reportSection('Recommendations', `<ul style="margin-left: 20px;">${recs.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`);
+    }
+
+    resultBox.innerHTML = html;
     resultBox.classList.remove('hidden');
 }
+
 
 // =============== TRAINING ===============
 function showTrainingModule(moduleId) {
@@ -341,7 +441,15 @@ function loadQuestion() {
     document.getElementById('progressFill').style.width = progress + '%';
     
     document.getElementById('questionText').textContent = question.scenario || question.question;
-    
+
+    // Only show "Finish Exam" on the last question - otherwise people can
+    // end the exam early and every unanswered question just counts wrong.
+    const isLastQuestion = currentQuestionIndex === currentExamQuestions.length - 1;
+    const nextBtn = document.getElementById('nextQuestionBtn');
+    const finishBtn = document.getElementById('finishExamBtn');
+    if (nextBtn) nextBtn.style.display = isLastQuestion ? 'none' : 'inline-block';
+    if (finishBtn) finishBtn.style.display = isLastQuestion ? 'inline-block' : 'none';
+
     const answersContainer = document.getElementById('answersContainer');
     answersContainer.innerHTML = '';
     
@@ -374,6 +482,11 @@ function nextQuestion() {
 }
 
 function finishExam() {
+    if (examAnswers[currentQuestionIndex] === undefined) {
+        alert('Please select an answer');
+        return;
+    }
+
     let score = 0;
     currentExamQuestions.forEach((question, index) => {
         if (examAnswers[index] === question.correct) {

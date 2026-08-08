@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
+import secrets
 from datetime import datetime
 from dotenv import load_dotenv
 import requests
@@ -13,23 +15,36 @@ import json
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'cyber-train-secret-key-2024'
+
+# ============= SECRET KEY =============
+# Never hardcode this. Set SECRET_KEY in your .env / host config so sessions
+# survive restarts; otherwise we generate a random one each boot (users get
+# logged out whenever the server restarts, but at least it's not guessable).
+app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
+if not os.getenv('SECRET_KEY'):
+    print("[WARNING] SECRET_KEY not set in .env - using a random key for this run only.")
+
 CORS(app)
 
 # ============= API KEYS =============
-OTX_KEY = os.getenv('OTX_KEY', '39d2146345368a5d26b2f94b6752ffbd6cf63a789eaa0868def5d36776019e70')
-VIRUSTOTAL_KEY = os.getenv('VIRUSTOTAL_KEY', 'a68dd667bb74ceb635d4533d798441e8a91a107532d574661458689b638999b8')
-MXTOOLBOX_KEY = os.getenv('MXTOOLBOX_KEY', '15bc7982-ce05-4bed-bc21-7d30441af639')
+# No hardcoded fallback keys - these MUST come from your .env file (or host
+# environment variables). Keys that were previously hardcoded here were
+# exposed in the source code; rotate/regenerate them with each provider.
+OTX_KEY = os.getenv('OTX_KEY')
+VIRUSTOTAL_KEY = os.getenv('VIRUSTOTAL_KEY')
+MXTOOLBOX_KEY = os.getenv('MXTOOLBOX_KEY')
 
-ADMIN_USER = 'admin'
-ADMIN_PASS = 'cyber123'
+ADMIN_USER = os.getenv('ADMIN_USER', 'admin')
+ADMIN_PASS = os.getenv('ADMIN_PASS')
 
 print("\n" + "="*70)
 print("[CyberTrain] Advanced Email Spoofing Detection Engine")
 print("="*70)
-print("[OK] API #1 - OTX AlienVault (Domain Reputation)")
-print("[OK] API #2 - VirusTotal (URL Scanning)")
-print("[OK] API #3 - MXToolbox (Email Headers)")
+print("[OK] API #1 - OTX AlienVault (Domain Reputation)" if OTX_KEY else "[WARNING] OTX_KEY missing from .env - domain reputation check will fail")
+print("[OK] API #2 - VirusTotal (URL Scanning)" if VIRUSTOTAL_KEY else "[WARNING] VIRUSTOTAL_KEY missing from .env - URL scanning will fail")
+print("[OK] API #3 - MXToolbox (Email Headers)" if MXTOOLBOX_KEY else "[WARNING] MXTOOLBOX_KEY missing from .env - header checks will fail")
+if not ADMIN_PASS:
+    print("[WARNING] ADMIN_PASS not set in .env - admin login is disabled until you set one")
 print("="*70 + "\n")
 
 def get_db():
@@ -69,15 +84,22 @@ def index():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username or not password:
+        return jsonify({'success': False, 'message': 'Username and password are required'}), 400
+    if len(password) < 6:
+        return jsonify({'success': False, 'message': 'Password must be at least 6 characters'}), 400
+
+    password_hash = generate_password_hash(password)
+
     db = get_db()
     try:
         db.execute(
             'INSERT INTO users (username, password, email, created_at) VALUES (?, ?, ?, ?)',
-            (username, password, None, datetime.now())
+            (username, password_hash, None, datetime.now())
         )
         db.commit()
         return jsonify({'success': True, 'message': 'Registration successful'})
@@ -88,18 +110,21 @@ def register():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username or not password:
+        return jsonify({'success': False, 'message': 'Username and password are required'}), 400
+
     db = get_db()
     user = db.execute(
-        'SELECT id, username FROM users WHERE username = ? AND password = ?',
-        (username, password)
+        'SELECT id, username, password FROM users WHERE username = ?',
+        (username,)
     ).fetchone()
     db.close()
-    
-    if user:
+
+    if user and check_password_hash(user['password'], password):
         session['user_id'] = user['id']
         session['username'] = user['username']
         return jsonify({'success': True, 'message': 'Login successful'})
@@ -108,10 +133,13 @@ def login():
 
 @app.route('/api/admin-login', methods=['POST'])
 def admin_login():
-    data = request.json
+    data = request.json or {}
     username = data.get('username')
     password = data.get('password')
-    
+
+    if not ADMIN_PASS:
+        return jsonify({'success': False, 'message': 'Admin login is not configured (set ADMIN_PASS in .env)'}), 500
+
     if username == ADMIN_USER and password == ADMIN_PASS:
         session['admin'] = True
         return jsonify({'success': True, 'message': 'Admin login successful'})
@@ -545,6 +573,33 @@ class ComprehensiveEmailAnalyzer:
             'severity': 'HIGH' if pattern_risk > 15 else 'MEDIUM' if pattern_risk > 0 else 'NONE'
         }
     
+    def _collect_warnings(self):
+        """يجمع كل أسباب الخطورة من كل الفحوصات بقائمة نصية واحدة تستخدمها الواجهة الأمامية"""
+        warnings = []
+
+        otx = self.report.get('api_1_otx', {})
+        warnings.extend(otx.get('risk_assessment', {}).get('reasons', []))
+
+        vt = self.report.get('api_2_virustotal', {})
+        for url_analysis in vt.get('urls_analysis', []):
+            threat_level = url_analysis.get('threat_level')
+            if threat_level in ('MALICIOUS', 'SUSPICIOUS'):
+                warnings.append('URL "' + url_analysis.get('url', '') + '" flagged as ' + threat_level + ' by VirusTotal')
+
+        mx = self.report.get('api_3_mxtoolbox', {})
+        for failure in mx.get('health_failures', []):
+            warnings.append('Email authentication issue: ' + failure)
+
+        patterns = self.report.get('pattern_analysis', {}).get('patterns_found', {})
+        for keyword in patterns.get('urgency_keywords', []):
+            warnings.append('Urgency/pressure language detected: "' + keyword + '"')
+        for greeting in patterns.get('generic_greetings', []):
+            warnings.append('Generic greeting detected: "' + greeting + '"')
+        for error in patterns.get('grammar_errors', []):
+            warnings.append('Possible grammar/spelling red flag: "' + error + '"')
+
+        return warnings
+
     def generate_assessment(self, sender, subject, body):
         """إنشاء تقييم شامل"""
         self.risk_score = min(max(self.risk_score, 0), 100)
@@ -599,6 +654,22 @@ class ComprehensiveEmailAnalyzer:
             recommendations.append('Normal email security practices apply')
         
         self.report['recommendations'] = recommendations
+
+        # ---- Fields the frontend (script.js -> displayEmailAnalysis) actually
+        # reads. These are flattened/simplified views of the detailed report
+        # above, kept in sync with it so the UI never sees undefined fields.
+        warnings = self._collect_warnings()
+        patterns_found_count = sum(
+            len(v) for v in self.report.get('pattern_analysis', {}).get('patterns_found', {}).values()
+        )
+
+        self.report['risk_level'] = risk_level
+        self.report['warnings'] = warnings
+        self.report['details'] = {
+            'sender': sender,
+            'patterns_found': patterns_found_count,
+            'risk_score': self.risk_score
+        }
     
     def _interpret_reputation(self, reputation):
         if reputation < -50:
@@ -643,6 +714,13 @@ class ComprehensiveEmailAnalyzer:
         # Step 1: Analyze sender
         domain = self.analyze_sender_email(sender)
         if not domain:
+            self.report['risk_level'] = 'LOW'
+            self.report['warnings'] = ['Could not analyze: sender email format is invalid']
+            self.report['details'] = {
+                'sender': sender,
+                'patterns_found': 0,
+                'risk_score': 0
+            }
             return self.report
         
         # Step 2: OTX Domain Check
@@ -679,11 +757,17 @@ class ComprehensiveEmailAnalyzer:
 
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
-    data = request.json
+    data = request.json or {}
     sender = data.get('email', '')
     subject = data.get('subject', '')
     body = data.get('body', '')
-    
+
+    if not sender or not subject or not body:
+        return jsonify({
+            'error': 'missing_fields',
+            'message': 'Sender, subject and body are all required'
+        }), 400
+
     try:
         analyzer = ComprehensiveEmailAnalyzer()
         report = analyzer.analyze(sender, subject, body)
@@ -749,4 +833,6 @@ def logout():
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, port=5000)
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    port = int(os.getenv('PORT', 5000))
+    app.run(debug=debug_mode, port=port)
