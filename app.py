@@ -29,7 +29,7 @@ print("[CyberTrain] Advanced Email Spoofing Detection Engine")
 print("="*70)
 print("[OK] API #1 - OTX AlienVault (Domain Reputation)")
 print("[OK] API #2 - VirusTotal (URL Scanning)")
-print("[OK] API #3 - MXToolbox (SPF/DKIM/DMARC Verification)")
+print("[OK] API #3 - MXToolbox (Email Headers)")
 print("="*70 + "\n")
 
 def get_db():
@@ -118,313 +118,564 @@ def admin_login():
     else:
         return jsonify({'success': False, 'message': 'Invalid admin credentials'}), 401
 
-# =============== ADVANCED EMAIL SPOOFING DETECTOR ===============
+# =============== COMPREHENSIVE EMAIL ANALYSIS ENGINE ===============
 
-class EmailSpoofingDetector:
+class ComprehensiveEmailAnalyzer:
     """
-    Advanced Email Spoofing Detection using 3 Real APIs:
-    1. OTX AlienVault - Domain Reputation
-    2. VirusTotal - URL Scanning
-    3. MXToolbox - Email Headers (SPF/DKIM/DMARC)
+    Comprehensive Email Spoofing Detection with Detailed Report
+    Analyzes all aspects: Domain, URLs, Headers, SPF, DKIM, DMARC
     """
     
     def __init__(self):
         self.risk_score = 0
-        self.warnings = []
-        self.api_results = {}
+        self.report = {
+            'email_info': {},
+            'api_1_otx': {},
+            'api_2_virustotal': {},
+            'api_3_mxtoolbox': {},
+            'pattern_analysis': {},
+            'security_checks': {},
+            'overall_assessment': {},
+            'recommendations': []
+        }
     
-    # ========== API #1: OTX AlienVault - Domain Reputation ==========
-    def check_domain_otx(self, domain):
-        """Check domain reputation with OTX AlienVault"""
-        print("[API #1] Checking domain: " + domain)
+    def analyze_sender_email(self, sender):
+        """تحليل بيانات البريل من المُرسل"""
+        if '@' not in sender:
+            self.report['email_info'] = {
+                'status': 'INVALID',
+                'error': 'Email format is invalid'
+            }
+            return None
+        
+        domain = sender.split('@')[1].lower()
+        username = sender.split('@')[0].lower()
+        
+        self.report['email_info'] = {
+            'full_email': sender,
+            'username': username,
+            'domain': domain,
+            'domain_extension': domain.split('.')[-1] if '.' in domain else 'unknown'
+        }
+        
+        return domain
+    
+    def api1_otx_domain_check(self, domain):
+        """API #1: OTX AlienVault - فحص سمعة الـ Domain"""
+        print("\n[API #1] OTX AlienVault - Domain Reputation Check")
+        print("Domain: " + domain)
+        
+        api_data = {
+            'api_name': 'OTX AlienVault',
+            'check_type': 'Domain Reputation & Threat Intelligence',
+            'status': 'pending',
+            'findings': {},
+            'risk_assessment': {}
+        }
         
         try:
             headers = {'X-OTX-API-KEY': OTX_KEY}
             response = requests.get(
                 'https://otx.alienvault.com/api/v1/indicators/domain/' + domain,
                 headers=headers,
-                timeout=8
+                timeout=10
             )
             
             if response.status_code == 200:
                 data = response.json()
                 reputation = data.get('reputation', 0)
                 pulse_count = len(data.get('pulse_info', {}).get('pulses', []))
-                alexa_rank = data.get('alexa_rank', None)
                 
-                print("    [OK] Reputation Score: " + str(reputation))
-                print("    [OK] Threat Pulses: " + str(pulse_count))
-                
-                self.api_results['otx_domain'] = {
-                    'reputation': reputation,
-                    'pulses': pulse_count,
-                    'status': 'checked'
+                api_data['status'] = 'completed'
+                api_data['findings'] = {
+                    'reputation_score': reputation,
+                    'threat_pulses_count': pulse_count,
+                    'reputation_interpretation': self._interpret_reputation(reputation),
+                    'pulse_interpretation': self._interpret_pulses(pulse_count)
                 }
                 
-                # Scoring
+                # تقييم المخاطر
+                risk_points = 0
+                risk_reasons = []
+                
                 if reputation < -50:
-                    self.risk_score += 35
-                    self.warnings.append("[OTX] Domain '" + domain + "' has VERY NEGATIVE reputation (" + str(reputation) + ")")
+                    risk_points += 35
+                    risk_reasons.append('Domain has EXTREMELY NEGATIVE reputation (' + str(reputation) + ')')
                 elif reputation < 0:
-                    self.risk_score += 20
-                    self.warnings.append("[OTX] Domain '" + domain + "' has negative reputation (" + str(reputation) + ")")
+                    risk_points += 20
+                    risk_reasons.append('Domain has negative reputation (' + str(reputation) + ')')
                 
                 if pulse_count > 5:
-                    self.risk_score += 25
-                    self.warnings.append("[OTX] Domain flagged in " + str(pulse_count) + " THREAT PULSES")
+                    risk_points += 25
+                    risk_reasons.append('Domain appears in ' + str(pulse_count) + ' THREAT INTELLIGENCE REPORTS')
                 elif pulse_count > 0:
-                    self.risk_score += 12
-                    self.warnings.append("[OTX] Domain in " + str(pulse_count) + " threat intelligence reports")
+                    risk_points += 12
+                    risk_reasons.append('Domain appears in ' + str(pulse_count) + ' threat intelligence reports')
                 
-                return True
+                api_data['risk_assessment'] = {
+                    'risk_points': risk_points,
+                    'reasons': risk_reasons,
+                    'severity': 'CRITICAL' if risk_points >= 35 else 'HIGH' if risk_points >= 20 else 'MEDIUM' if risk_points > 0 else 'LOW'
+                }
+                
+                self.risk_score += risk_points
+                
+                print("  Reputation: " + str(reputation))
+                print("  Threat Pulses: " + str(pulse_count))
+                print("  Risk Points: " + str(risk_points))
+            else:
+                api_data['status'] = 'error'
+                api_data['error'] = 'HTTP ' + str(response.status_code)
+                
         except Exception as e:
-            print("    [ERROR] OTX Error: " + str(e))
-            self.api_results['otx_domain'] = {'status': 'error', 'message': str(e)}
+            api_data['status'] = 'error'
+            api_data['error'] = str(e)
+            print("  ERROR: " + str(e))
         
-        return False
+        self.report['api_1_otx'] = api_data
+        return api_data
     
-    # ========== API #2: VirusTotal - URL Scanning ==========
-    def check_url_virustotal(self, url):
-        """Check URL with VirusTotal"""
-        print("[API #2] Checking: " + url)
+    def api2_virustotal_url_check(self, urls):
+        """API #2: VirusTotal - فحص الروابط في البريل"""
+        print("\n[API #2] VirusTotal - URL Scanning")
+        
+        api_data = {
+            'api_name': 'VirusTotal',
+            'check_type': 'URL Malware & Phishing Detection',
+            'status': 'pending',
+            'urls_found': len(urls),
+            'urls_analysis': []
+        }
+        
+        if len(urls) == 0:
+            api_data['status'] = 'no_urls'
+            api_data['message'] = 'No URLs found in email body'
+            self.report['api_2_virustotal'] = api_data
+            return api_data
         
         try:
             headers = {'x-apikey': VIRUSTOTAL_KEY}
             
-            # Submit URL
-            submit_response = requests.post(
-                'https://www.virustotal.com/api/v3/urls',
-                data={'url': url},
-                headers=headers,
-                timeout=8
-            )
+            for url in urls:
+                print("  Checking: " + url)
+                url_analysis = {'url': url, 'status': 'pending'}
+                
+                try:
+                    # Submit URL
+                    submit_response = requests.post(
+                        'https://www.virustotal.com/api/v3/urls',
+                        data={'url': url},
+                        headers=headers,
+                        timeout=10
+                    )
+                    
+                    if submit_response.status_code == 200:
+                        submit_data = submit_response.json()
+                        url_id = submit_data['data']['id']
+                        
+                        time.sleep(1)
+                        
+                        # Get results
+                        analysis_response = requests.get(
+                            'https://www.virustotal.com/api/v3/urls/' + url_id,
+                            headers=headers,
+                            timeout=10
+                        )
+                        
+                        if analysis_response.status_code == 200:
+                            analysis_data = analysis_response.json()
+                            stats = analysis_data['data']['attributes']['last_analysis_stats']
+                            
+                            malicious = stats.get('malicious', 0)
+                            suspicious = stats.get('suspicious', 0)
+                            harmless = stats.get('harmless', 0)
+                            undetected = stats.get('undetected', 0)
+                            total = malicious + suspicious + harmless + undetected
+                            
+                            url_analysis['status'] = 'completed'
+                            url_analysis['scan_results'] = {
+                                'malicious_vendors': malicious,
+                                'suspicious_vendors': suspicious,
+                                'harmless_vendors': harmless,
+                                'undetected_vendors': undetected,
+                                'total_vendors': total
+                            }
+                            
+                            # Risk assessment
+                            risk_points = 0
+                            severity_level = 'LOW'
+                            
+                            if malicious > 0:
+                                risk_points = 40
+                                severity_level = 'CRITICAL'
+                                url_analysis['threat_level'] = 'MALICIOUS'
+                            elif suspicious > 0:
+                                risk_points = 20
+                                severity_level = 'HIGH'
+                                url_analysis['threat_level'] = 'SUSPICIOUS'
+                            else:
+                                severity_level = 'SAFE'
+                                url_analysis['threat_level'] = 'SAFE'
+                            
+                            url_analysis['risk_assessment'] = {
+                                'risk_points': risk_points,
+                                'severity': severity_level
+                            }
+                            
+                            self.risk_score += risk_points
+                            
+                            print("    Malicious: " + str(malicious))
+                            print("    Suspicious: " + str(suspicious))
+                            print("    Safe: " + str(harmless))
+                    else:
+                        url_analysis['status'] = 'error'
+                        url_analysis['error'] = 'HTTP ' + str(submit_response.status_code)
+                
+                except Exception as url_error:
+                    url_analysis['status'] = 'error'
+                    url_analysis['error'] = str(url_error)
+                
+                api_data['urls_analysis'].append(url_analysis)
             
-            if submit_response.status_code == 200:
-                submit_data = submit_response.json()
-                url_id = submit_data['data']['id']
-                
-                time.sleep(0.5)
-                
-                # Get results
-                analysis_response = requests.get(
-                    'https://www.virustotal.com/api/v3/urls/' + url_id,
-                    headers=headers,
-                    timeout=8
-                )
-                
-                if analysis_response.status_code == 200:
-                    data = analysis_response.json()
-                    stats = data['data']['attributes']['last_analysis_stats']
-                    
-                    malicious = stats.get('malicious', 0)
-                    suspicious = stats.get('suspicious', 0)
-                    
-                    print("    [OK] Malicious: " + str(malicious))
-                    print("    [OK] Suspicious: " + str(suspicious))
-                    
-                    if malicious > 0:
-                        self.risk_score += 40
-                        self.warnings.append("[VirusTotal] MALICIOUS URL: " + url + " (" + str(malicious) + " vendors flagged)")
-                    elif suspicious > 0:
-                        self.risk_score += 20
-                        self.warnings.append("[VirusTotal] SUSPICIOUS URL: " + url + " (" + str(suspicious) + " vendors flagged)")
-                    
-                    return True
+            api_data['status'] = 'completed'
+            
         except Exception as e:
-            print("    [ERROR] VirusTotal Error: " + str(e))
+            api_data['status'] = 'error'
+            api_data['error'] = str(e)
+            print("  ERROR: " + str(e))
         
-        return False
+        self.report['api_2_virustotal'] = api_data
+        return api_data
     
-    # ========== API #3: MXToolbox - SPF/DKIM/DMARC ==========
-    def check_email_headers_mxtoolbox(self, domain):
-        """Check Email Authentication with MXToolbox"""
-        print("[API #3] Checking Email Authentication for: " + domain)
+    def api3_mxtoolbox_headers_check(self, domain):
+        """API #3: MXToolbox - فحص SPF/DKIM/DMARC/MX"""
+        print("\n[API #3] MXToolbox - Email Authentication Headers")
+        
+        api_data = {
+            'api_name': 'MXToolbox',
+            'check_type': 'Email Authentication (SPF, DKIM, DMARC, MX)',
+            'status': 'pending',
+            'domain': domain,
+            'checks': {}
+        }
         
         try:
             base_url = 'https://api.mxtoolbox.com/api/v1'
             
-            # Check SPF
-            print("    Checking SPF Record...")
-            spf_response = requests.get(
-                base_url + '/spf/' + domain,
-                params={'apikey': MXTOOLBOX_KEY},
-                timeout=8
-            )
-            
-            spf_valid = False
-            if spf_response.status_code == 200:
-                spf_data = spf_response.json()
-                spf_valid = spf_data.get('status') == 'valid'
-                print("       [OK] SPF: " + spf_data.get('status', 'not found'))
+            # SPF Check
+            print("  Checking SPF Records...")
+            spf_check = {'check': 'SPF', 'status': 'pending'}
+            try:
+                spf_response = requests.get(
+                    base_url + '/spf/' + domain,
+                    params={'apikey': MXTOOLBOX_KEY},
+                    timeout=10
+                )
                 
-                if not spf_valid:
-                    self.risk_score += 15
-                    self.warnings.append("[MXToolbox] SPF record MISSING or INVALID for " + domain)
+                if spf_response.status_code == 200:
+                    spf_data = spf_response.json()
+                    spf_valid = spf_data.get('status') == 'valid'
+                    spf_check['status'] = 'completed'
+                    spf_check['result'] = spf_data.get('status', 'unknown')
+                    spf_check['valid'] = spf_valid
+                    spf_check['interpretation'] = 'SPF record is VALID - Sender domain can be verified' if spf_valid else 'SPF record is MISSING or INVALID - Domain can be spoofed'
+                    
+                    if not spf_valid:
+                        spf_check['risk_points'] = 15
+                        self.risk_score += 15
+                    
+                    print("    SPF: " + spf_data.get('status', 'unknown'))
+                else:
+                    spf_check['status'] = 'error'
+                    spf_check['error'] = 'HTTP ' + str(spf_response.status_code)
+            except Exception as e:
+                spf_check['status'] = 'error'
+                spf_check['error'] = str(e)
             
             time.sleep(0.5)
             
-            # Check DMARC
-            print("    Checking DMARC Policy...")
-            dmarc_response = requests.get(
-                base_url + '/dmarc/' + domain,
-                params={'apikey': MXTOOLBOX_KEY},
-                timeout=8
-            )
-            
-            dmarc_valid = False
-            if dmarc_response.status_code == 200:
-                dmarc_data = dmarc_response.json()
-                dmarc_valid = dmarc_data.get('status') == 'valid'
-                print("       [OK] DMARC: " + dmarc_data.get('status', 'not found'))
+            # DMARC Check
+            print("  Checking DMARC Policy...")
+            dmarc_check = {'check': 'DMARC', 'status': 'pending'}
+            try:
+                dmarc_response = requests.get(
+                    base_url + '/dmarc/' + domain,
+                    params={'apikey': MXTOOLBOX_KEY},
+                    timeout=10
+                )
                 
-                if not dmarc_valid:
-                    self.risk_score += 15
-                    self.warnings.append("[MXToolbox] DMARC policy MISSING or WEAK for " + domain)
+                if dmarc_response.status_code == 200:
+                    dmarc_data = dmarc_response.json()
+                    dmarc_valid = dmarc_data.get('status') == 'valid'
+                    dmarc_check['status'] = 'completed'
+                    dmarc_check['result'] = dmarc_data.get('status', 'unknown')
+                    dmarc_check['valid'] = dmarc_valid
+                    dmarc_check['interpretation'] = 'DMARC policy is VALID - Domain has strong authentication' if dmarc_valid else 'DMARC policy is MISSING or WEAK - Domain lacks proper authentication'
+                    
+                    if not dmarc_valid:
+                        dmarc_check['risk_points'] = 15
+                        self.risk_score += 15
+                    
+                    print("    DMARC: " + dmarc_data.get('status', 'unknown'))
+                else:
+                    dmarc_check['status'] = 'error'
+                    dmarc_check['error'] = 'HTTP ' + str(dmarc_response.status_code)
+            except Exception as e:
+                dmarc_check['status'] = 'error'
+                dmarc_check['error'] = str(e)
             
             time.sleep(0.5)
             
-            # Check MX Records
-            print("    Checking MX Records...")
-            mx_response = requests.get(
-                base_url + '/mxlookup/' + domain,
-                params={'apikey': MXTOOLBOX_KEY},
-                timeout=8
-            )
-            
-            if mx_response.status_code == 200:
-                mx_data = mx_response.json()
-                mx_records = mx_data.get('result', [])
-                print("       [OK] MX Records Found: " + str(len(mx_records)))
+            # MX Records Check
+            print("  Checking MX Records...")
+            mx_check = {'check': 'MX Records', 'status': 'pending'}
+            try:
+                mx_response = requests.get(
+                    base_url + '/mxlookup/' + domain,
+                    params={'apikey': MXTOOLBOX_KEY},
+                    timeout=10
+                )
                 
-                if len(mx_records) == 0:
-                    self.risk_score += 20
-                    self.warnings.append("[MXToolbox] NO MX RECORDS - Domain cannot receive emails!")
+                if mx_response.status_code == 200:
+                    mx_data = mx_response.json()
+                    mx_records = mx_data.get('result', [])
+                    mx_check['status'] = 'completed'
+                    mx_check['records_found'] = len(mx_records)
+                    mx_check['records'] = mx_records[:3] if mx_records else []
+                    mx_check['interpretation'] = str(len(mx_records)) + ' MX record(s) found - Domain can receive emails' if mx_records else 'NO MX RECORDS - Domain cannot receive legitimate emails'
+                    
+                    if len(mx_records) == 0:
+                        mx_check['risk_points'] = 20
+                        self.risk_score += 20
+                    
+                    print("    MX Records: " + str(len(mx_records)))
+                else:
+                    mx_check['status'] = 'error'
+                    mx_check['error'] = 'HTTP ' + str(mx_response.status_code)
+            except Exception as e:
+                mx_check['status'] = 'error'
+                mx_check['error'] = str(e)
             
-            self.api_results['mxtoolbox_headers'] = {
-                'spf_valid': spf_valid,
-                'dmarc_valid': dmarc_valid,
-                'status': 'checked'
+            api_data['status'] = 'completed'
+            api_data['checks'] = {
+                'spf': spf_check,
+                'dmarc': dmarc_check,
+                'mx_records': mx_check
             }
             
-            return True
+            # Email Health Score
+            health_score = 100
+            failures = []
+            if not spf_check.get('valid', False):
+                health_score -= 30
+                failures.append('SPF failed')
+            if not dmarc_check.get('valid', False):
+                health_score -= 30
+                failures.append('DMARC failed')
+            if mx_check.get('records_found', 0) == 0:
+                health_score -= 40
+                failures.append('No MX records')
+            
+            api_data['email_health_score'] = health_score
+            api_data['email_health_assessment'] = 'HEALTHY' if health_score >= 70 else 'WEAK' if health_score >= 40 else 'CRITICAL'
+            api_data['health_failures'] = failures
+            
         except Exception as e:
-            print("    [ERROR] MXToolbox Error: " + str(e))
-            self.api_results['mxtoolbox_headers'] = {'status': 'error', 'message': str(e)}
+            api_data['status'] = 'error'
+            api_data['error'] = str(e)
+            print("  ERROR: " + str(e))
         
-        return False
+        self.report['api_3_mxtoolbox'] = api_data
+        return api_data
     
-    def extract_urls(self, text):
-        """Extract URLs from text"""
-        url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-        return re.findall(url_pattern, text)
-    
-    def detect_patterns(self, subject, body, sender):
-        """Detect suspicious patterns"""
+    def detect_patterns(self, subject, body):
+        """تحليل أنماط النص المريبة"""
+        print("\n[STEP 4] Content Pattern Analysis")
+        
         text = (subject + " " + body).lower()
+        patterns = {
+            'urgency_keywords': [],
+            'suspicious_phrases': [],
+            'generic_greetings': [],
+            'grammar_errors': []
+        }
         
         # Urgency keywords
-        urgent_keywords = [
+        urgency_list = [
             'verify account', 'confirm password', 'click here', 'urgent',
             'act now', '24 hour', 'immediate', 'suspended', 'locked',
-            'unusual activity', 'security alert', 're-enter', 're-verify'
+            'unusual activity', 'security alert', 're-enter', 're-verify',
+            'confirm identity', 'update payment'
         ]
         
-        found_urgency = []
-        for keyword in urgent_keywords:
+        for keyword in urgency_list:
             if keyword in text:
-                found_urgency.append(keyword)
+                patterns['urgency_keywords'].append(keyword)
         
-        if len(found_urgency) >= 2:
-            self.risk_score += 15
-            self.warnings.append("[PATTERN] HIGH URGENCY LANGUAGE: " + ", ".join(found_urgency[:2]))
-        
-        # Generic greeting
-        if any(greeting in text for greeting in ['dear user', 'dear customer', 'account holder']):
-            self.risk_score += 8
-            self.warnings.append("[PATTERN] Generic greeting (not personalized)")
+        # Generic greetings
+        greetings = ['dear user', 'dear customer', 'account holder', 'valued customer']
+        for greeting in greetings:
+            if greeting in text:
+                patterns['generic_greetings'].append(greeting)
         
         # Grammar errors
-        errors = ['recieve', 'occured', 'bussiness', 'knowlege']
-        if any(error in text for error in errors):
-            self.risk_score += 5
-            self.warnings.append("[PATTERN] Spelling/grammar errors detected")
+        errors = ['recieve', 'occured', 'bussiness', 'knowlege', 'seperete']
+        for error in errors:
+            if error in text:
+                patterns['grammar_errors'].append(error)
+        
+        # Risk scoring
+        pattern_risk = 0
+        if len(patterns['urgency_keywords']) >= 2:
+            pattern_risk += 15
+        elif len(patterns['urgency_keywords']) >= 1:
+            pattern_risk += 8
+        
+        if len(patterns['generic_greetings']) > 0:
+            pattern_risk += 8
+        
+        if len(patterns['grammar_errors']) > 0:
+            pattern_risk += 5
+        
+        self.risk_score += pattern_risk
+        
+        self.report['pattern_analysis'] = {
+            'patterns_found': patterns,
+            'risk_points': pattern_risk,
+            'severity': 'HIGH' if pattern_risk > 15 else 'MEDIUM' if pattern_risk > 0 else 'NONE'
+        }
     
-    def analyze(self, sender, subject, body):
-        """Complete Email Spoofing Analysis"""
-        print("\n" + "="*70)
-        print("[CyberTrain] COMPLETE EMAIL ANALYSIS - 3 REAL APIS")
-        print("="*70)
-        print("From: " + sender)
-        print("Subject: " + subject)
-        print("-"*70)
-        
-        self.risk_score = 0
-        self.warnings = []
-        self.api_results = {}
-        
-        # Extract domain
-        if '@' not in sender:
-            self.warnings.append("[ERROR] Invalid email format")
-            return self._finalize(sender)
-        
-        domain = sender.split('@')[1].lower()
-        urls = self.extract_urls(body)
-        
-        # Step 1: OTX - Domain Reputation
-        print("\n[STEP 1] Domain Reputation Check (OTX AlienVault)")
-        self.check_domain_otx(domain)
-        time.sleep(1)
-        
-        # Step 2: VirusTotal - URL Scanning
-        if urls:
-            print("\n[STEP 2] URL Scanning (VirusTotal) - Found " + str(len(urls)) + " URL(s)")
-            for url in urls:
-                self.check_url_virustotal(url)
-                time.sleep(0.5)
-        else:
-            print("\n[STEP 2] No URLs found in email body")
-        
-        # Step 3: MXToolbox - Email Headers
-        print("\n[STEP 3] Email Authentication Verification (MXToolbox)")
-        self.check_email_headers_mxtoolbox(domain)
-        
-        # Step 4: Pattern Detection
-        print("\n[STEP 4] Content Analysis & Pattern Detection")
-        self.detect_patterns(subject, body, sender)
-        
-        return self._finalize(sender)
-    
-    def _finalize(self, sender):
-        """Finalize analysis and calculate final score"""
+    def generate_assessment(self, sender, subject, body):
+        """إنشاء تقييم شامل"""
         self.risk_score = min(max(self.risk_score, 0), 100)
         
         if self.risk_score >= 50:
             risk_level = 'CRITICAL'
+            color = 'red'
         elif self.risk_score >= 30:
             risk_level = 'HIGH'
+            color = 'orange'
         elif self.risk_score >= 15:
             risk_level = 'MEDIUM'
+            color = 'yellow'
         else:
             risk_level = 'LOW'
+            color = 'green'
+        
+        self.report['overall_assessment'] = {
+            'risk_level': risk_level,
+            'risk_score': self.risk_score,
+            'color': color,
+            'summary': self._get_summary(risk_level),
+            'decision': self._get_decision(risk_level),
+            'action_required': risk_level in ['CRITICAL', 'HIGH']
+        }
+        
+        # Recommendations
+        recommendations = []
+        
+        if risk_level == 'CRITICAL':
+            recommendations.append('DELETE this email immediately')
+            recommendations.append('DO NOT click any links or open attachments')
+            recommendations.append('Report as phishing to your email provider')
+            recommendations.append('Notify your IT security team')
+            recommendations.append('If you clicked any links, change your passwords immediately')
+        
+        elif risk_level == 'HIGH':
+            recommendations.append('DO NOT respond to this email')
+            recommendations.append('DO NOT click any links or download attachments')
+            recommendations.append('Verify sender through official channels (call them directly)')
+            recommendations.append('Report as suspicious to your email provider')
+            recommendations.append('Consider notifying IT security team')
+        
+        elif risk_level == 'MEDIUM':
+            recommendations.append('Be cautious before taking any action')
+            recommendations.append('Verify sender independently before responding')
+            recommendations.append('Do not provide sensitive information')
+            recommendations.append('Check sender email address carefully')
+        
+        else:
+            recommendations.append('Appears to be legitimate communication')
+            recommendations.append('Normal email security practices apply')
+        
+        self.report['recommendations'] = recommendations
+    
+    def _interpret_reputation(self, reputation):
+        if reputation < -50:
+            return 'EXTREMELY NEGATIVE - Domain has very poor reputation'
+        elif reputation < 0:
+            return 'NEGATIVE - Domain shows negative indicators'
+        else:
+            return 'CLEAN - No negative indicators found'
+    
+    def _interpret_pulses(self, count):
+        if count > 5:
+            return 'HIGHLY SUSPICIOUS - Domain appears in multiple threat reports'
+        elif count > 0:
+            return 'SUSPICIOUS - Domain has threat intelligence history'
+        else:
+            return 'CLEAN - No threat intelligence reports found'
+    
+    def _get_summary(self, risk_level):
+        summaries = {
+            'CRITICAL': 'This email presents CRITICAL RISK. Multiple indicators of phishing/spoofing detected.',
+            'HIGH': 'This email presents HIGH RISK. Strong indicators of phishing/spoofing detected.',
+            'MEDIUM': 'This email presents MODERATE RISK. Some suspicious indicators detected.',
+            'LOW': 'This email presents LOW RISK. Appears to be legitimate communication.'
+        }
+        return summaries.get(risk_level, 'Unknown risk level')
+    
+    def _get_decision(self, risk_level):
+        decisions = {
+            'CRITICAL': 'DELETE IMMEDIATELY - HIGH CONFIDENCE THIS IS PHISHING',
+            'HIGH': 'DO NOT INTERACT - LIKELY PHISHING',
+            'MEDIUM': 'CAUTION REQUIRED - VERIFY BEFORE RESPONDING',
+            'LOW': 'SAFE TO INTERACT - APPEARS LEGITIMATE'
+        }
+        return decisions.get(risk_level, 'Unknown')
+    
+    def analyze(self, sender, subject, body):
+        """تحليل شامل للبريل"""
+        print("\n" + "="*70)
+        print("[CyberTrain] COMPREHENSIVE EMAIL SECURITY ANALYSIS")
+        print("="*70)
+        
+        # Step 1: Analyze sender
+        domain = self.analyze_sender_email(sender)
+        if not domain:
+            return self.report
+        
+        # Step 2: OTX Domain Check
+        self.api1_otx_domain_check(domain)
+        time.sleep(1)
+        
+        # Step 3: VirusTotal URL Check
+        urls = self._extract_urls(body)
+        self.api2_virustotal_url_check(urls)
+        time.sleep(1)
+        
+        # Step 4: MXToolbox Headers Check
+        self.api3_mxtoolbox_headers_check(domain)
+        time.sleep(1)
+        
+        # Step 5: Pattern Detection
+        self.detect_patterns(subject, body)
+        
+        # Step 6: Generate Assessment
+        self.generate_assessment(sender, subject, body)
         
         print("\n" + "="*70)
         print("[RESULT] ANALYSIS COMPLETE")
-        print("Risk Level: " + risk_level)
-        print("Risk Score: " + str(self.risk_score) + "/100")
-        print("Total Warnings: " + str(len(self.warnings)))
+        print("Risk Level: " + self.report['overall_assessment']['risk_level'])
+        print("Risk Score: " + str(self.report['overall_assessment']['risk_score']) + "/100")
         print("="*70 + "\n")
         
-        return {
-            'email': sender,
-            'risk_level': risk_level,
-            'warnings': self.warnings,
-            'details': {
-                'sender': sender,
-                'risk_score': self.risk_score,
-                'api_results': self.api_results,
-                'patterns_found': len(self.warnings)
-            }
-        }
+        return self.report
+    
+    def _extract_urls(self, text):
+        """استخراج الروابط من النص"""
+        url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+        return re.findall(url_pattern, text)
 
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
@@ -434,16 +685,15 @@ def check_email():
     body = data.get('body', '')
     
     try:
-        detector = EmailSpoofingDetector()
-        result = detector.analyze(sender, subject, body)
-        return jsonify(result)
+        analyzer = ComprehensiveEmailAnalyzer()
+        report = analyzer.analyze(sender, subject, body)
+        return jsonify(report)
     except Exception as e:
         print("[ERROR] Analysis Error: " + str(e))
         return jsonify({
-            'email': sender,
-            'risk_level': 'error',
-            'warnings': ['Error: ' + str(e)],
-            'details': {'risk_score': 0}
+            'error': 'analysis_failed',
+            'message': 'Error during analysis: ' + str(e),
+            'recommendation': 'Please try again or contact support'
         }), 500
 
 @app.route('/api/save-exam-result', methods=['POST'])
