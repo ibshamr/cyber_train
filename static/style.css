@@ -25,6 +25,30 @@ html[lang="ar"] {
     direction: rtl;
 }
 
+/* Google Translate: we drive it programmatically from our own EN/AR
+   buttons, so hide every bit of its default UI (the widget box, the
+   top banner iframe it injects, and the body offset it adds). */
+#google_translate_element,
+.goog-te-banner-frame,
+.goog-te-gadget-icon {
+    display: none !important;
+}
+
+body {
+    top: 0 !important;
+    position: static !important;
+}
+
+.goog-tooltip,
+.goog-tooltip:hover {
+    display: none !important;
+}
+
+.goog-text-highlight {
+    background: none !important;
+    box-shadow: none !important;
+}
+
 /* Language Selector */
 .language-selector {
     position: fixed;
@@ -161,6 +185,26 @@ html[lang="ar"] {
 @keyframes typeAnimation {
     0%, 100% { r: 4; }
     50% { r: 6; fill: #00ff88; }
+}
+
+.shield-pulse {
+    animation: shieldPulse 2.5s ease-in-out infinite;
+}
+
+@keyframes shieldPulse {
+    0%, 100% { stroke-opacity: 0.4; stroke-width: 3; }
+    50% { stroke-opacity: 1; stroke-width: 6; }
+}
+
+.shield-check {
+    stroke-dasharray: 120;
+    stroke-dashoffset: 120;
+    animation: shieldCheck 2.5s ease-in-out infinite;
+}
+
+@keyframes shieldCheck {
+    0% { stroke-dashoffset: 120; }
+    40%, 100% { stroke-dashoffset: 0; }
 }
 
 .float-text {

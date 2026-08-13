@@ -75,6 +75,19 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES users(id)
         )
     ''')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS email_checks (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            performed_by TEXT,
+            sender TEXT,
+            subject TEXT,
+            risk_level TEXT,
+            risk_score INTEGER,
+            created_at TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    ''')
     db.commit()
     db.close()
 
@@ -122,9 +135,25 @@ def login():
         'SELECT id, username, password FROM users WHERE username = ?',
         (username,)
     ).fetchone()
+
+    if not user:
+        db.close()
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+    valid = check_password_hash(user['password'], password)
+
+    # Backward compatibility: accounts created before password hashing was
+    # added still have the raw plaintext password stored. If it matches,
+    # log the user in and silently upgrade their stored password to a
+    # proper hash so this only ever happens once per account.
+    if not valid and user['password'] == password:
+        valid = True
+        db.execute('UPDATE users SET password = ? WHERE id = ?', (generate_password_hash(password), user['id']))
+        db.commit()
+
     db.close()
 
-    if user and check_password_hash(user['password'], password):
+    if valid:
         session['user_id'] = user['id']
         session['username'] = user['username']
         return jsonify({'success': True, 'message': 'Login successful'})
@@ -779,6 +808,12 @@ class ComprehensiveEmailAnalyzer:
 
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
+    if 'user_id' not in session and 'admin' not in session:
+        return jsonify({
+            'error': 'unauthorized',
+            'message': 'Please login first'
+        }), 401
+
     data = request.json or {}
     sender = data.get('email', '')
     subject = data.get('subject', '')
@@ -793,6 +828,24 @@ def check_email():
     try:
         analyzer = ComprehensiveEmailAnalyzer()
         report = analyzer.analyze(sender, subject, body)
+
+        # Log the check so admins can see who checked what, and how risky it was.
+        db = get_db()
+        db.execute(
+            'INSERT INTO email_checks (user_id, performed_by, sender, subject, risk_level, risk_score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (
+                session.get('user_id'),
+                'admin' if 'admin' in session and 'user_id' not in session else session.get('username', 'unknown'),
+                sender,
+                subject,
+                report.get('risk_level'),
+                report.get('details', {}).get('risk_score'),
+                datetime.now()
+            )
+        )
+        db.commit()
+        db.close()
+
         return jsonify(report)
     except Exception as e:
         print("[ERROR] Analysis Error: " + str(e))
@@ -836,17 +889,35 @@ def admin_dashboard():
         return jsonify({'success': False}), 401
     
     db = get_db()
+
+    # Every registered employee, whether or not they've taken an exam yet.
+    users = db.execute('SELECT id, username, created_at FROM users ORDER BY created_at DESC').fetchall()
+
     results = db.execute('''
         SELECT u.username, e.exam_type, e.level, e.score, e.total, e.created_at
         FROM exam_results e
         JOIN users u ON e.user_id = u.id
         ORDER BY e.created_at DESC
     ''').fetchall()
-    
-    user_count = db.execute('SELECT COUNT(*) as count FROM users').fetchone()['count']
+
+    # Every email an employee (or admin) has checked, with the resulting risk
+    # level - so if a real incident happens, you can see whether the
+    # employee checked the email first and what the tool told them.
+    email_checks = db.execute('''
+        SELECT ec.performed_by, ec.sender, ec.subject, ec.risk_level, ec.risk_score, ec.created_at
+        FROM email_checks ec
+        ORDER BY ec.created_at DESC
+    ''').fetchall()
+
+    user_count = len(users)
     db.close()
     
-    return jsonify({'total_users': user_count, 'results': [dict(row) for row in results]})
+    return jsonify({
+        'total_users': user_count,
+        'users': [dict(row) for row in users],
+        'results': [dict(row) for row in results],
+        'email_checks': [dict(row) for row in email_checks]
+    })
 
 @app.route('/api/logout', methods=['POST'])
 def logout():

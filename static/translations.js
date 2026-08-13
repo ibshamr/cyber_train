@@ -85,7 +85,8 @@ const translations = {
         // Tooltips
         placeholder_sender: 'user@company.com',
         placeholder_subject: 'Email subject',
-        placeholder_body: 'Paste email content here...'
+        placeholder_body: 'Paste email content here...',
+        developed_by: 'Developed by Ibrahim Shamroukh'
     },
     
     ar: {
@@ -174,11 +175,34 @@ const translations = {
         // Placeholders
         placeholder_sender: 'user@company.com',
         placeholder_subject: 'موضوع البريل',
-        placeholder_body: 'الصق محتوى البريل هنا...'
+        placeholder_body: 'الصق محتوى البريل هنا...',
+        developed_by: 'تطوير: إبراهيم شمروخ'
     }
 };
 
 let currentLang = localStorage.getItem('lang') || 'en';
+
+// Drives the hidden Google Translate widget (see index.html) so the WHOLE
+// page - exam questions, training text, admin tables, anything added later -
+// gets translated automatically, without hand-maintaining Arabic copies of
+// every string. Retries briefly because the widget loads asynchronously.
+function driveGoogleTranslate(lang, attemptsLeft) {
+    if (attemptsLeft === undefined) attemptsLeft = 20;
+    const select = document.querySelector('select.goog-te-combo');
+
+    if (!select) {
+        if (attemptsLeft > 0) {
+            setTimeout(() => driveGoogleTranslate(lang, attemptsLeft - 1), 300);
+        }
+        return;
+    }
+
+    const target = lang === 'ar' ? 'ar' : 'en';
+    if (select.value !== target) {
+        select.value = target;
+        select.dispatchEvent(new Event('change'));
+    }
+}
 
 function changeLanguage(lang) {
     currentLang = lang;
@@ -186,6 +210,7 @@ function changeLanguage(lang) {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     updatePageLanguage();
+    driveGoogleTranslate(lang);
     
     // Update active button
     document.querySelectorAll('.lang-btn').forEach(btn => {

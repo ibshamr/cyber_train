@@ -7,6 +7,18 @@ let currentQuestionIndex = 0;
 let examAnswers = [];
 let isAdmin = localStorage.getItem('isAdmin') === 'true' || false;
 
+// Returns the Arabic version of a data.js field (e.g. "question" -> "question_ar")
+// when the current language is Arabic and a translation exists, otherwise
+// falls back to the original English field. Used for exam questions, email
+// spoofing scenarios, training scenarios and training module content.
+function tf(obj, field) {
+    if (!obj) return '';
+    if (typeof currentLang !== 'undefined' && currentLang === 'ar' && obj[field + '_ar']) {
+        return obj[field + '_ar'];
+    }
+    return obj[field];
+}
+
 // =============== PAGE MANAGEMENT ===============
 function showPage(pageId) {
     // Hide all pages
@@ -243,8 +255,8 @@ function reportSection(title, innerHtml) {
     `;
 }
 
-function displayEmailAnalysis(analysis) {
-    const resultBox = document.getElementById('emailResult');
+function displayEmailAnalysis(analysis, resultBoxId) {
+    const resultBox = document.getElementById(resultBoxId || 'emailResult');
 
     // The sender email address itself was invalid - nothing else was checked.
     if (analysis.email_info && analysis.email_info.status === 'INVALID') {
@@ -373,8 +385,8 @@ function showTrainingModule(moduleId) {
     
     if (module) {
         trainingModule.innerHTML = `
-            <h4>${module.title}</h4>
-            ${module.content}
+            <h4>${tf(module, 'title')}</h4>
+            ${tf(module, 'content')}
             <button onclick="document.getElementById('trainingModule').classList.add('hidden')" class="btn btn-danger" style="margin-top: 1rem;">Close Module</button>
         `;
         trainingModule.classList.remove('hidden');
@@ -398,9 +410,9 @@ function showSpoofingScenarios() {
         scenariosHTML += `
             <div class="scenario-box" style="border-left-color: ${statusColor}; margin: 1rem 0;">
                 <h5 style="color: ${statusColor};">Case ${index + 1}: ${statusText}</h5>
-                <p><strong>Scenario:</strong> ${scenario.scenario}</p>
-                <p><strong>Analysis:</strong> ${scenario.analysis}</p>
-                <p><strong>What to look for:</strong> ${scenario.redFlags}</p>
+                <p><strong>Scenario:</strong> ${tf(scenario, 'scenario')}</p>
+                <p><strong>Analysis:</strong> ${tf(scenario, 'analysis')}</p>
+                <p><strong>What to look for:</strong> ${tf(scenario, 'redFlags')}</p>
             </div>
         `;
     });
@@ -620,15 +632,54 @@ function loadAdminPanel() {
         if (data.results && data.results.length > 0) {
             tbody.innerHTML = data.results.map(result => `
                 <tr>
-                    <td>${result.username || 'N/A'}</td>
-                    <td>${result.exam_type || 'N/A'}</td>
-                    <td>${result.level || 'N/A'}</td>
+                    <td>${escapeHtml(result.username || 'N/A')}</td>
+                    <td>${escapeHtml(result.exam_type || 'N/A')}</td>
+                    <td>${escapeHtml(result.level || 'N/A')}</td>
                     <td>${result.score}/${result.total}</td>
                     <td>${new Date(result.created_at).toLocaleDateString()}</td>
                 </tr>
             `).join('');
         } else {
             tbody.innerHTML = '<tr><td colspan="5">No exam results yet</td></tr>';
+        }
+
+        // Every registered employee, whether or not they've taken an exam.
+        const checksPerUser = {};
+        (data.email_checks || []).forEach(c => {
+            checksPerUser[c.performed_by] = (checksPerUser[c.performed_by] || 0) + 1;
+        });
+        const usersBody = document.getElementById('usersTableBody');
+        if (usersBody) {
+            if (data.users && data.users.length > 0) {
+                usersBody.innerHTML = data.users.map(u => `
+                    <tr>
+                        <td>${escapeHtml(u.username)}</td>
+                        <td>${new Date(u.created_at).toLocaleDateString()}</td>
+                        <td>${checksPerUser[u.username] || 0}</td>
+                    </tr>
+                `).join('');
+            } else {
+                usersBody.innerHTML = '<tr><td colspan="3">No employees registered yet</td></tr>';
+            }
+        }
+
+        // Full email-check log so admins can confirm whether an employee
+        // checked a suspicious email, and what risk level it got.
+        const emailLogBody = document.getElementById('emailLogTableBody');
+        if (emailLogBody) {
+            if (data.email_checks && data.email_checks.length > 0) {
+                emailLogBody.innerHTML = data.email_checks.map(c => `
+                    <tr>
+                        <td>${escapeHtml(c.performed_by || 'N/A')}</td>
+                        <td>${escapeHtml(c.sender || 'N/A')}</td>
+                        <td>${escapeHtml(c.subject || 'N/A')}</td>
+                        <td class="risk-${(c.risk_level || '').toLowerCase()}">${escapeHtml(c.risk_level || 'N/A')} (${c.risk_score ?? '-'}/100)</td>
+                        <td>${new Date(c.created_at).toLocaleString()}</td>
+                    </tr>
+                `).join('');
+            } else {
+                emailLogBody.innerHTML = '<tr><td colspan="5">No emails checked yet</td></tr>';
+            }
         }
     })
     .catch(err => {
@@ -642,6 +693,43 @@ function loadAdminPanel() {
     loadAdminTraining();
     
     showPage('admin-dashboard');
+}
+
+// Admin's own Email Checker - reuses the same backend endpoint and report
+// renderer as the employee tool, just with separate input/output element IDs.
+async function adminAnalyzeEmail() {
+    const sender = document.getElementById('adminSenderEmail').value;
+    const subject = document.getElementById('adminEmailSubject').value;
+    const body = document.getElementById('adminEmailBody').value;
+
+    if (!sender || !subject || !body) {
+        alert('Please enter email sender and content');
+        return;
+    }
+
+    const resultBox = document.getElementById('adminEmailResult');
+    resultBox.innerHTML = '<p>Analyzing... this checks 3 external APIs and can take a few seconds.</p>';
+    resultBox.classList.remove('hidden');
+
+    try {
+        const response = await fetch('/api/check-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: sender, body, subject })
+        });
+
+        const analysis = await response.json();
+
+        if (!response.ok || analysis.error) {
+            resultBox.innerHTML = `<div class="result-detail"><strong>Error:</strong> ${escapeHtml(analysis.message || 'Analysis failed')}</div>`;
+            return;
+        }
+
+        displayEmailAnalysis(analysis, 'adminEmailResult');
+    } catch (err) {
+        console.error('Email analysis error:', err);
+        resultBox.innerHTML = `<div class="result-detail"><strong>Error:</strong> ${escapeHtml(err.message)}</div>`;
+    }
 }
 
 function switchAdminTab(tab) {
