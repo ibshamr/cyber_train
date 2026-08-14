@@ -208,6 +208,7 @@ async function analyzeEmail() {
     const sender = document.getElementById('senderEmail').value;
     const subject = document.getElementById('emailSubject').value;
     const body = document.getElementById('emailBody').value;
+    const rawHeaders = document.getElementById('emailRawHeaders') ? document.getElementById('emailRawHeaders').value : '';
     
     if (!sender || !subject || !body) {
         alert('Please enter email sender and content');
@@ -222,7 +223,7 @@ async function analyzeEmail() {
         const response = await fetch('/api/check-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: sender, body, subject })
+            body: JSON.stringify({ email: sender, body, subject, raw_headers: rawHeaders })
         });
         
         const analysis = await response.json();
@@ -359,6 +360,44 @@ function displayEmailAnalysis(analysis, resultBoxId) {
     html += reportSection('Content Pattern Analysis', patternLines.length
         ? `<ul style="margin-left: 20px;">${patternLines.join('')}</ul>`
         : '<p>No suspicious wording patterns detected.</p>');
+
+    // ---- 6b. Advanced checks: work even on brand-new domains no threat
+    // database has seen yet (typosquatting, homograph, display-name spoof,
+    // real Authentication-Results / Reply-To from pasted raw headers) ----
+    const adv = analysis.advanced_checks || {};
+    const advLines = [];
+
+    const typo = adv.typosquatting || {};
+    if (typo.is_suspicious) {
+        advLines.push(`<li style="color:#ff4444;"><strong>Lookalike domain:</strong> resembles known brand "${escapeHtml(typo.matched_brand)}" (edit distance ${typo.distance}) - classic typosquatting</li>`);
+    }
+    const homograph = adv.homograph || {};
+    if (homograph.is_suspicious) {
+        advLines.push(`<li style="color:#ff4444;"><strong>Homograph attack:</strong> domain contains lookalike characters from: ${homograph.scripts_found.map(escapeHtml).join(', ')}</li>`);
+    }
+    const dnSpoof = adv.display_name_spoofing || {};
+    if (dnSpoof.is_suspicious) {
+        advLines.push(`<li style="color:#ff4444;"><strong>Display name spoofing:</strong> claims to be "${escapeHtml(dnSpoof.claimed_brand)}" but the domain doesn't match</li>`);
+    }
+    const replyMismatch = adv.reply_to_mismatch || {};
+    if (replyMismatch.is_suspicious) {
+        advLines.push(`<li style="color:#ff4444;"><strong>Reply-To mismatch:</strong> replies go to "${escapeHtml(replyMismatch.reply_to_domain)}" instead of the sender's own domain "${escapeHtml(replyMismatch.sender_domain)}" (common BEC pattern)</li>`);
+    }
+    (adv.auth_failures || []).forEach(f => {
+        advLines.push(`<li style="color:#ff4444;"><strong>Header authentication:</strong> ${escapeHtml(f)}</li>`);
+    });
+
+    const headers = adv.headers || {};
+    let advNote = '';
+    if (!headers.provided) {
+        advNote = '<p style="color:#aaa; margin-top:0.5rem;">No raw headers were pasted, so real Authentication-Results and Reply-To checks were skipped - paste them for the most accurate result.</p>';
+    } else {
+        advNote = `<p style="color:#aaa; margin-top:0.5rem;">Parsed from headers: SPF=${escapeHtml(headers.auth_results.spf || 'not found')}, DKIM=${escapeHtml(headers.auth_results.dkim || 'not found')}, DMARC=${escapeHtml(headers.auth_results.dmarc || 'not found')}, ${headers.received_hop_count} Received hop(s).</p>`;
+    }
+
+    html += reportSection('Advanced Spoofing Detection', (advLines.length
+        ? `<ul style="margin-left: 20px;">${advLines.join('')}</ul>`
+        : '<p>No lookalike-domain, display-name, or header authentication red flags found.</p>') + advNote);
 
     // ---- 7. All warnings, flattened ----
     const warnings = analysis.warnings || [];
@@ -701,6 +740,7 @@ async function adminAnalyzeEmail() {
     const sender = document.getElementById('adminSenderEmail').value;
     const subject = document.getElementById('adminEmailSubject').value;
     const body = document.getElementById('adminEmailBody').value;
+    const rawHeaders = document.getElementById('adminEmailRawHeaders') ? document.getElementById('adminEmailRawHeaders').value : '';
 
     if (!sender || !subject || !body) {
         alert('Please enter email sender and content');
@@ -715,7 +755,7 @@ async function adminAnalyzeEmail() {
         const response = await fetch('/api/check-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: sender, body, subject })
+            body: JSON.stringify({ email: sender, body, subject, raw_headers: rawHeaders })
         });
 
         const analysis = await response.json();

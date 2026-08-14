@@ -86,7 +86,9 @@ const translations = {
         placeholder_sender: 'user@company.com',
         placeholder_subject: 'Email subject',
         placeholder_body: 'Paste email content here...',
-        developed_by: 'Developed by Ibrahim Shamroukh'
+        developed_by: 'Developed by Ibrahim Shamroukh',
+        raw_headers_label: 'Raw Email Headers (optional, but recommended):',
+        raw_headers_placeholder: 'Paste full raw headers here for real SPF/DKIM/DMARC results'
     },
     
     ar: {
@@ -176,7 +178,9 @@ const translations = {
         placeholder_sender: 'user@company.com',
         placeholder_subject: 'موضوع البريل',
         placeholder_body: 'الصق محتوى البريل هنا...',
-        developed_by: 'تطوير: إبراهيم شمروخ'
+        developed_by: 'تطوير: إبراهيم شمروخ',
+        raw_headers_label: 'الهيدرز الخام للإيميل (اختياري، لكن موصى فيه):',
+        raw_headers_placeholder: 'الصق كامل الهيدرز الخام هون للحصول على نتيجة SPF/DKIM/DMARC حقيقية'
     }
 };
 

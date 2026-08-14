@@ -26,6 +26,33 @@ if not os.getenv('SECRET_KEY'):
 
 CORS(app)
 
+# Global safety net: if ANY route crashes with an unexpected exception, this
+# guarantees the frontend still gets valid JSON back (with a readable error
+# message) instead of Flask's default HTML error page - which is what was
+# causing "Unexpected token '<' ... is not valid JSON" on the frontend.
+from werkzeug.exceptions import HTTPException
+
+@app.errorhandler(Exception)
+def handle_uncaught_exception(e):
+    if isinstance(e, HTTPException):
+        # Still return JSON for any /api/ route so the frontend's
+        # response.json() never breaks, even on 400/404/405 etc.
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'success': False,
+                'error': 'request_error',
+                'message': e.description or str(e)
+            }), e.code
+        return e
+    import traceback
+    print("[UNCAUGHT ERROR] " + str(e))
+    traceback.print_exc()
+    return jsonify({
+        'success': False,
+        'error': 'server_error',
+        'message': 'Server error: ' + str(e)
+    }), 500
+
 # ============= API KEYS =============
 # No hardcoded fallback keys - these MUST come from your .env file (or host
 # environment variables). Keys that were previously hardcoded here were
@@ -90,6 +117,13 @@ def init_db():
     ''')
     db.commit()
     db.close()
+
+# Create tables immediately at import time - NOT just inside `if __name__ ==
+# '__main__'`, which only runs with `python app.py` and is silently skipped
+# by gunicorn (`gunicorn app:app` just imports this module). Without this,
+# the tables never got created in any real deployment, and every DB-touching
+# route below would crash with "no such table".
+init_db()
 
 @app.route('/')
 def index():
@@ -197,25 +231,189 @@ class ComprehensiveEmailAnalyzer:
         }
     
     def analyze_sender_email(self, sender):
-        """تحليل بيانات البريل من المُرسل"""
-        if '@' not in sender:
+        """تحليل بيانات البريل من المُرسل - يدعم صيغة "Display Name <email@domain>" """
+        display_name = None
+        email_part = sender.strip()
+
+        # "PayPal Support <security@paypa1.com>" style header
+        name_match = re.match(r'^\s*"?([^"<]*)"?\s*<([^<>]+)>\s*$', sender)
+        if name_match:
+            display_name = name_match.group(1).strip() or None
+            email_part = name_match.group(2).strip()
+
+        if '@' not in email_part:
             self.report['email_info'] = {
                 'status': 'INVALID',
                 'error': 'Email format is invalid'
             }
             return None
         
-        domain = sender.split('@')[1].lower()
-        username = sender.split('@')[0].lower()
+        domain = email_part.split('@')[1].lower()
+        username = email_part.split('@')[0].lower()
         
         self.report['email_info'] = {
-            'full_email': sender,
+            'full_email': email_part,
+            'display_name': display_name,
             'username': username,
             'domain': domain,
             'domain_extension': domain.split('.')[-1] if '.' in domain else 'unknown'
         }
         
         return domain
+    
+    # Well-known, frequently-impersonated brand domains. Used to catch
+    # lookalike/typosquatted domains (e.g. "paypa1-secure.com") that threat
+    # intelligence databases won't have flagged yet because the domain was
+    # only just registered by the attacker - this is the main defense
+    # against brand-new "zero-day" spoofing domains.
+    KNOWN_BRAND_DOMAINS = [
+        'paypal.com', 'microsoft.com', 'apple.com', 'google.com', 'amazon.com',
+        'facebook.com', 'instagram.com', 'linkedin.com', 'netflix.com',
+        'dropbox.com', 'docusign.com', 'adobe.com', 'bankofamerica.com',
+        'chase.com', 'wellsfargo.com', 'americanexpress.com', 'hsbc.com',
+        'dhl.com', 'fedex.com', 'ups.com', 'usps.com', 'outlook.com',
+        'office365.com', 'zoom.us', 'salesforce.com', 'stripe.com',
+        'gmail.com', 'yahoo.com', 'irs.gov'
+    ]
+
+    @staticmethod
+    def _levenshtein(a, b):
+        if a == b:
+            return 0
+        if len(a) < len(b):
+            a, b = b, a
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            curr = [i] + [0] * len(b)
+            for j, cb in enumerate(b, 1):
+                curr[j] = min(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + (ca != cb)
+                )
+            prev = curr
+        return prev[-1]
+
+    # Generic infrastructure words that show up in countless legitimate
+    # domains (webmail.company.com, support-team.com...) - comparing these
+    # against brand names on their own creates false positives (e.g. "mail"
+    # is edit-distance 1 from "gmail"), so they're excluded as standalone
+    # tokens even though they may still be part of a flagged compound token.
+    GENERIC_INFRA_WORDS = {
+        'mail', 'team', 'help', 'support', 'service', 'secure', 'verify',
+        'account', 'accounts', 'update', 'news', 'info', 'portal', 'login',
+        'admin', 'web', 'site', 'app', 'online', 'alert', 'alerts', 'my',
+        'the', 'get', 'new'
+    }
+
+    def detect_typosquatting(self, domain):
+        """يقارن الدومين (وكل قطعة فيه لحالها) بأشهر البراندات المستهدفة عادةً بالتزوير"""
+        result = {'is_suspicious': False, 'matched_brand': None, 'distance': None}
+        if domain in self.KNOWN_BRAND_DOMAINS:
+            return result
+
+        domain_root = domain.split('.')[0]
+        # Attackers commonly do "brand-word" or "brandword123" - split on
+        # non-alphanumeric characters so "paypa1-secure" is checked as both
+        # "paypa1" and "secure" against each brand, not as one long string
+        # where the added suffix inflates the edit distance past any
+        # reasonable threshold.
+        tokens = [
+            t for t in re.split(r'[^a-z0-9]+', domain_root)
+            if len(t) >= 4 and t not in self.GENERIC_INFRA_WORDS
+        ]
+        if not tokens:
+            tokens = [domain_root]
+
+        best_brand = None
+        best_distance = 999
+        for brand in self.KNOWN_BRAND_DOMAINS:
+            brand_root = brand.split('.')[0]
+            for token in tokens:
+                # Require the token to be close in length to the brand root
+                # too - otherwise a short, coincidentally-close token (e.g.
+                # a 4-letter word that happens to be 1 edit from an unrelated
+                # 5-letter brand) triggers false positives.
+                if abs(len(token) - len(brand_root)) > 1:
+                    continue
+                dist = self._levenshtein(token, brand_root)
+                if dist < best_distance:
+                    best_distance = dist
+                    best_brand = brand
+
+        # A short edit-distance to a well-known brand root (e.g. "paypa1"
+        # vs "paypal" = distance 1) is a strong lookalike-domain signal,
+        # regardless of whether the domain has ever been reported as
+        # malicious anywhere before.
+        if best_brand and 0 < best_distance <= 2:
+            result['is_suspicious'] = True
+            result['matched_brand'] = best_brand
+            result['distance'] = best_distance
+        return result
+
+    def detect_homograph(self, domain):
+        """يكشف الحروف من أبجديات مختلفة (سيريلية/يونانية) تشبه اللاتينية بصرياً"""
+        scripts_found = set()
+        for ch in domain:
+            if ch.isascii():
+                continue
+            code = ord(ch)
+            if 0x0400 <= code <= 0x04FF:
+                scripts_found.add('Cyrillic')
+            elif 0x0370 <= code <= 0x03FF:
+                scripts_found.add('Greek')
+            elif code > 0x2000:
+                scripts_found.add('Other non-Latin')
+        return {
+            'is_suspicious': len(scripts_found) > 0,
+            'scripts_found': list(scripts_found)
+        }
+
+    def check_display_name_spoofing(self, display_name, domain):
+        """لو اسم العرض فيه اسم براند لكن الدومين الفعلي مختلف تماماً"""
+        result = {'is_suspicious': False, 'claimed_brand': None}
+        if not display_name:
+            return result
+        name_lower = display_name.lower()
+        for brand in self.KNOWN_BRAND_DOMAINS:
+            brand_name = brand.split('.')[0]
+            if brand_name in name_lower and brand not in domain and domain not in brand:
+                result['is_suspicious'] = True
+                result['claimed_brand'] = brand
+                break
+        return result
+
+    def parse_raw_headers(self, raw_headers):
+        """يقرأ Authentication-Results (اللي سيرفر البريد الحقيقي حسبها وقت الاستلام) وباقي الهيدرز المهمة"""
+        result = {
+            'provided': bool(raw_headers and raw_headers.strip()),
+            'auth_results': {'spf': None, 'dkim': None, 'dmarc': None},
+            'return_path': None,
+            'reply_to': None,
+            'received_hop_count': 0
+        }
+        if not result['provided']:
+            return result
+
+        auth_match = re.search(r'Authentication-Results:.*', raw_headers, re.IGNORECASE)
+        if auth_match:
+            auth_line = auth_match.group(0)
+            for mech in ['spf', 'dkim', 'dmarc']:
+                m = re.search(mech + r'=(\w+)', auth_line, re.IGNORECASE)
+                if m:
+                    result['auth_results'][mech] = m.group(1).lower()
+
+        rp_match = re.search(r'Return-Path:\s*<?([^\s<>\r\n]+)>?', raw_headers, re.IGNORECASE)
+        if rp_match:
+            result['return_path'] = rp_match.group(1)
+
+        reply_match = re.search(r'Reply-To:\s*.*?<?([^\s<>\r\n]+@[^\s<>\r\n]+)>?', raw_headers, re.IGNORECASE)
+        if reply_match:
+            result['reply_to'] = reply_match.group(1)
+
+        result['received_hop_count'] = len(re.findall(r'^Received:', raw_headers, re.IGNORECASE | re.MULTILINE))
+
+        return result
     
     def api1_otx_domain_check(self, domain):
         """API #1: OTX AlienVault - فحص سمعة الـ Domain"""
@@ -624,6 +822,51 @@ class ComprehensiveEmailAnalyzer:
             'severity': 'HIGH' if pattern_risk > 15 else 'MEDIUM' if pattern_risk > 0 else 'NONE'
         }
     
+    def run_advanced_checks(self, domain, display_name, sender_full, raw_headers):
+        """فحوصات إضافية لا تعتمد على قواعد بيانات تهديدات معروفة سلفاً - بتشتغل حتى على دومين جديد بالكامل"""
+        checks = {}
+
+        typo = self.detect_typosquatting(domain)
+        checks['typosquatting'] = typo
+        if typo['is_suspicious']:
+            checks['typosquatting']['risk_points'] = 35
+            self.risk_score += 35
+
+        homograph = self.detect_homograph(domain)
+        checks['homograph'] = homograph
+        if homograph['is_suspicious']:
+            checks['homograph']['risk_points'] = 30
+            self.risk_score += 30
+
+        dn_spoof = self.check_display_name_spoofing(display_name, domain)
+        checks['display_name_spoofing'] = dn_spoof
+        if dn_spoof['is_suspicious']:
+            checks['display_name_spoofing']['risk_points'] = 25
+            self.risk_score += 25
+
+        headers = self.parse_raw_headers(raw_headers)
+        checks['headers'] = headers
+
+        if headers['provided']:
+            for mech in ['spf', 'dkim', 'dmarc']:
+                result = headers['auth_results'].get(mech)
+                if result and result not in ('pass',):
+                    checks.setdefault('auth_failures', []).append(mech.upper() + ' = ' + result + ' (per Authentication-Results header)')
+                    self.risk_score += 15
+
+            if headers['reply_to']:
+                reply_domain = headers['reply_to'].split('@')[-1].lower() if '@' in headers['reply_to'] else ''
+                if reply_domain and reply_domain != domain:
+                    checks['reply_to_mismatch'] = {
+                        'is_suspicious': True,
+                        'reply_to_domain': reply_domain,
+                        'sender_domain': domain
+                    }
+                    self.risk_score += 20
+
+        self.report['advanced_checks'] = checks
+        return checks
+
     def _collect_warnings(self):
         """يجمع كل أسباب الخطورة من كل الفحوصات بقائمة نصية واحدة تستخدمها الواجهة الأمامية"""
         warnings = []
@@ -648,6 +891,22 @@ class ComprehensiveEmailAnalyzer:
             warnings.append('Generic greeting detected: "' + greeting + '"')
         for error in patterns.get('grammar_errors', []):
             warnings.append('Possible grammar/spelling red flag: "' + error + '"')
+
+        adv = self.report.get('advanced_checks', {})
+        typo = adv.get('typosquatting', {})
+        if typo.get('is_suspicious'):
+            warnings.append('Domain "' + self.report.get('email_info', {}).get('domain', '') + '" closely resembles known brand "' + typo['matched_brand'] + '" (possible typosquatting)')
+        homograph = adv.get('homograph', {})
+        if homograph.get('is_suspicious'):
+            warnings.append('Domain contains lookalike characters from: ' + ', '.join(homograph['scripts_found']))
+        dn_spoof = adv.get('display_name_spoofing', {})
+        if dn_spoof.get('is_suspicious'):
+            warnings.append('Display name claims to be "' + dn_spoof['claimed_brand'] + '" but the actual email domain does not match')
+        for failure in adv.get('auth_failures', []):
+            warnings.append('Header authentication failed: ' + failure)
+        reply_mismatch = adv.get('reply_to_mismatch', {})
+        if reply_mismatch.get('is_suspicious'):
+            warnings.append('Reply-To domain "' + reply_mismatch['reply_to_domain'] + '" differs from sender domain "' + reply_mismatch['sender_domain'] + '" (common BEC pattern)')
 
         return warnings
 
@@ -756,13 +1015,14 @@ class ComprehensiveEmailAnalyzer:
         }
         return decisions.get(risk_level, 'Unknown')
     
-    def analyze(self, sender, subject, body):
+    def analyze(self, sender, subject, body, raw_headers=None):
         """تحليل شامل للبريل"""
         print("\n" + "="*70)
         print("[CyberTrain] COMPREHENSIVE EMAIL SECURITY ANALYSIS")
         print("="*70)
         
-        # Step 1: Analyze sender
+        # Step 1: Analyze sender (also extracts display name if given as
+        # "Display Name <email@domain>")
         domain = self.analyze_sender_email(sender)
         if not domain:
             self.report['risk_level'] = 'LOW'
@@ -789,8 +1049,16 @@ class ComprehensiveEmailAnalyzer:
         
         # Step 5: Pattern Detection
         self.detect_patterns(subject, body)
+
+        # Step 6: Advanced checks that don't depend on any external threat
+        # database - typosquatting, homograph domains, display-name spoofing,
+        # and (if raw headers were pasted) real Authentication-Results /
+        # Reply-To mismatch. These catch brand-new "zero-day" spoofing
+        # domains that OTX/VirusTotal have simply never seen before.
+        display_name = self.report.get('email_info', {}).get('display_name')
+        self.run_advanced_checks(domain, display_name, sender, raw_headers)
         
-        # Step 6: Generate Assessment
+        # Step 7: Generate Assessment
         self.generate_assessment(sender, subject, body)
         
         print("\n" + "="*70)
@@ -818,6 +1086,7 @@ def check_email():
     sender = data.get('email', '')
     subject = data.get('subject', '')
     body = data.get('body', '')
+    raw_headers = data.get('raw_headers', '')
 
     if not sender or not subject or not body:
         return jsonify({
@@ -827,7 +1096,7 @@ def check_email():
 
     try:
         analyzer = ComprehensiveEmailAnalyzer()
-        report = analyzer.analyze(sender, subject, body)
+        report = analyzer.analyze(sender, subject, body, raw_headers)
 
         # Log the check so admins can see who checked what, and how risky it was.
         db = get_db()
