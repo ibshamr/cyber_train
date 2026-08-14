@@ -1,9 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
-import secrets
 from datetime import datetime
 from dotenv import load_dotenv
 import requests
@@ -16,62 +14,33 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# ============= SECRET KEY =============
-# Never hardcode this. Set SECRET_KEY in your .env / host config so sessions
-# survive restarts; otherwise we generate a random one each boot (users get
-# logged out whenever the server restarts, but at least it's not guessable).
-app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
-if not os.getenv('SECRET_KEY'):
-    print("[WARNING] SECRET_KEY not set in .env - using a random key for this run only.")
-
-CORS(app)
-
-# Global safety net: if ANY route crashes with an unexpected exception, this
-# guarantees the frontend still gets valid JSON back (with a readable error
-# message) instead of Flask's default HTML error page - which is what was
-# causing "Unexpected token '<' ... is not valid JSON" on the frontend.
-from werkzeug.exceptions import HTTPException
-
-@app.errorhandler(Exception)
-def handle_uncaught_exception(e):
-    if isinstance(e, HTTPException):
-        # Still return JSON for any /api/ route so the frontend's
-        # response.json() never breaks, even on 400/404/405 etc.
-        if request.path.startswith('/api/'):
-            return jsonify({
-                'success': False,
-                'error': 'request_error',
-                'message': e.description or str(e)
-            }), e.code
-        return e
-    import traceback
-    print("[UNCAUGHT ERROR] " + str(e))
-    traceback.print_exc()
-    return jsonify({
-        'success': False,
-        'error': 'server_error',
-        'message': 'Server error: ' + str(e)
-    }), 500
-
-# ============= API KEYS =============
-# No hardcoded fallback keys - these MUST come from your .env file (or host
-# environment variables). Keys that were previously hardcoded here were
-# exposed in the source code; rotate/regenerate them with each provider.
+# ============= SECRETS (from .env ONLY - no hardcoded fallbacks) =============
+app.secret_key = os.getenv('SECRET_KEY')
 OTX_KEY = os.getenv('OTX_KEY')
 VIRUSTOTAL_KEY = os.getenv('VIRUSTOTAL_KEY')
 MXTOOLBOX_KEY = os.getenv('MXTOOLBOX_KEY')
-
-ADMIN_USER = os.getenv('ADMIN_USER', 'admin')
+ADMIN_USER = os.getenv('ADMIN_USER')
 ADMIN_PASS = os.getenv('ADMIN_PASS')
+
+_required = {
+    'SECRET_KEY': app.secret_key, 'OTX_KEY': OTX_KEY, 'VIRUSTOTAL_KEY': VIRUSTOTAL_KEY,
+    'MXTOOLBOX_KEY': MXTOOLBOX_KEY, 'ADMIN_USER': ADMIN_USER, 'ADMIN_PASS': ADMIN_PASS
+}
+_missing = [k for k, v in _required.items() if not v]
+if _missing:
+    raise RuntimeError(
+        "Missing required .env values: " + ", ".join(_missing) +
+        ". Create a .env file next to app.py with these keys set (see .env template)."
+    )
+
+CORS(app)
 
 print("\n" + "="*70)
 print("[CyberTrain] Advanced Email Spoofing Detection Engine")
 print("="*70)
-print("[OK] API #1 - OTX AlienVault (Domain Reputation)" if OTX_KEY else "[WARNING] OTX_KEY missing from .env - domain reputation check will fail")
-print("[OK] API #2 - VirusTotal (URL Scanning)" if VIRUSTOTAL_KEY else "[WARNING] VIRUSTOTAL_KEY missing from .env - URL scanning will fail")
-print("[OK] API #3 - MXToolbox (Email Headers)" if MXTOOLBOX_KEY else "[WARNING] MXTOOLBOX_KEY missing from .env - header checks will fail")
-if not ADMIN_PASS:
-    print("[WARNING] ADMIN_PASS not set in .env - admin login is disabled until you set one")
+print("[OK] API #1 - OTX AlienVault (Domain Reputation)")
+print("[OK] API #2 - VirusTotal (URL Scanning)")
+print("[OK] API #3 - MXToolbox (Email Headers)")
 print("="*70 + "\n")
 
 def get_db():
@@ -87,7 +56,9 @@ def init_db():
             username TEXT UNIQUE,
             password TEXT,
             email TEXT,
-            created_at TIMESTAMP
+            created_at TIMESTAMP,
+            pledge_accepted INTEGER DEFAULT 0,
+            pledge_accepted_at TIMESTAMP
         )
     ''')
     db.execute('''
@@ -106,24 +77,24 @@ def init_db():
         CREATE TABLE IF NOT EXISTS email_checks (
             id INTEGER PRIMARY KEY,
             user_id INTEGER,
-            performed_by TEXT,
             sender TEXT,
-            subject TEXT,
             risk_level TEXT,
             risk_score INTEGER,
             created_at TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(id)
         )
     ''')
+    # ترقية قاعدة بيانات قديمة (لو الجدول موجود من قبل بدون عمود التعهد)
+    try:
+        db.execute('ALTER TABLE users ADD COLUMN pledge_accepted INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute('ALTER TABLE users ADD COLUMN pledge_accepted_at TIMESTAMP')
+    except sqlite3.OperationalError:
+        pass
     db.commit()
     db.close()
-
-# Create tables immediately at import time - NOT just inside `if __name__ ==
-# '__main__'`, which only runs with `python app.py` and is silently skipped
-# by gunicorn (`gunicorn app:app` just imports this module). Without this,
-# the tables never got created in any real deployment, and every DB-touching
-# route below would crash with "no such table".
-init_db()
 
 @app.route('/')
 def index():
@@ -131,25 +102,31 @@ def index():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.json or {}
-    username = (data.get('username') or '').strip()
-    password = data.get('password') or ''
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
 
     if not username or not password:
         return jsonify({'success': False, 'message': 'Username and password are required'}), 400
-    if len(password) < 6:
-        return jsonify({'success': False, 'message': 'Password must be at least 6 characters'}), 400
-
-    password_hash = generate_password_hash(password)
 
     db = get_db()
     try:
-        db.execute(
-            'INSERT INTO users (username, password, email, created_at) VALUES (?, ?, ?, ?)',
-            (username, password_hash, None, datetime.now())
+        cursor = db.execute(
+            'INSERT INTO users (username, password, email, created_at, pledge_accepted) VALUES (?, ?, ?, ?, 0)',
+            (username, password, None, datetime.now())
         )
         db.commit()
-        return jsonify({'success': True, 'message': 'Registration successful'})
+        new_user_id = cursor.lastrowid
+
+        # تسجيل دخول تلقائي بعد التسجيل، عشان نقدر نعرض شاشة التعهد فوراً
+        session['user_id'] = new_user_id
+        session['username'] = username
+
+        return jsonify({
+            'success': True,
+            'message': 'Registration successful',
+            'needs_pledge': True
+        })
     except sqlite3.IntegrityError:
         return jsonify({'success': False, 'message': 'Username already exists'}), 400
     finally:
@@ -157,52 +134,48 @@ def register():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json or {}
-    username = (data.get('username') or '').strip()
-    password = data.get('password') or ''
-
-    if not username or not password:
-        return jsonify({'success': False, 'message': 'Username and password are required'}), 400
-
-    db = get_db()
-    user = db.execute(
-        'SELECT id, username, password FROM users WHERE username = ?',
-        (username,)
-    ).fetchone()
-
-    if not user:
-        db.close()
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-
-    valid = check_password_hash(user['password'], password)
-
-    # Backward compatibility: accounts created before password hashing was
-    # added still have the raw plaintext password stored. If it matches,
-    # log the user in and silently upgrade their stored password to a
-    # proper hash so this only ever happens once per account.
-    if not valid and user['password'] == password:
-        valid = True
-        db.execute('UPDATE users SET password = ? WHERE id = ?', (generate_password_hash(password), user['id']))
-        db.commit()
-
-    db.close()
-
-    if valid:
-        session['user_id'] = user['id']
-        session['username'] = user['username']
-        return jsonify({'success': True, 'message': 'Login successful'})
-    else:
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-
-@app.route('/api/admin-login', methods=['POST'])
-def admin_login():
-    data = request.json or {}
+    data = request.json
     username = data.get('username')
     password = data.get('password')
 
-    if not ADMIN_PASS:
-        return jsonify({'success': False, 'message': 'Admin login is not configured (set ADMIN_PASS in .env)'}), 500
+    db = get_db()
+    user = db.execute(
+        'SELECT id, username, pledge_accepted FROM users WHERE username = ? AND password = ?',
+        (username, password)
+    ).fetchone()
+    db.close()
 
+    if user:
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        return jsonify({
+            'success': True,
+            'message': 'Login successful',
+            'needs_pledge': not bool(user['pledge_accepted'])
+        })
+    else:
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+@app.route('/api/accept-pledge', methods=['POST'])
+def accept_pledge():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'Not logged in'}), 401
+
+    db = get_db()
+    db.execute(
+        'UPDATE users SET pledge_accepted = 1, pledge_accepted_at = ? WHERE id = ?',
+        (datetime.now(), session['user_id'])
+    )
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'message': 'Pledge accepted'})
+
+@app.route('/api/admin-login', methods=['POST'])
+def admin_login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
     if username == ADMIN_USER and password == ADMIN_PASS:
         session['admin'] = True
         return jsonify({'success': True, 'message': 'Admin login successful'})
@@ -231,189 +204,25 @@ class ComprehensiveEmailAnalyzer:
         }
     
     def analyze_sender_email(self, sender):
-        """تحليل بيانات البريل من المُرسل - يدعم صيغة "Display Name <email@domain>" """
-        display_name = None
-        email_part = sender.strip()
-
-        # "PayPal Support <security@paypa1.com>" style header
-        name_match = re.match(r'^\s*"?([^"<]*)"?\s*<([^<>]+)>\s*$', sender)
-        if name_match:
-            display_name = name_match.group(1).strip() or None
-            email_part = name_match.group(2).strip()
-
-        if '@' not in email_part:
+        """تحليل بيانات البريل من المُرسل"""
+        if '@' not in sender:
             self.report['email_info'] = {
                 'status': 'INVALID',
                 'error': 'Email format is invalid'
             }
             return None
         
-        domain = email_part.split('@')[1].lower()
-        username = email_part.split('@')[0].lower()
+        domain = sender.split('@')[1].lower()
+        username = sender.split('@')[0].lower()
         
         self.report['email_info'] = {
-            'full_email': email_part,
-            'display_name': display_name,
+            'full_email': sender,
             'username': username,
             'domain': domain,
             'domain_extension': domain.split('.')[-1] if '.' in domain else 'unknown'
         }
         
         return domain
-    
-    # Well-known, frequently-impersonated brand domains. Used to catch
-    # lookalike/typosquatted domains (e.g. "paypa1-secure.com") that threat
-    # intelligence databases won't have flagged yet because the domain was
-    # only just registered by the attacker - this is the main defense
-    # against brand-new "zero-day" spoofing domains.
-    KNOWN_BRAND_DOMAINS = [
-        'paypal.com', 'microsoft.com', 'apple.com', 'google.com', 'amazon.com',
-        'facebook.com', 'instagram.com', 'linkedin.com', 'netflix.com',
-        'dropbox.com', 'docusign.com', 'adobe.com', 'bankofamerica.com',
-        'chase.com', 'wellsfargo.com', 'americanexpress.com', 'hsbc.com',
-        'dhl.com', 'fedex.com', 'ups.com', 'usps.com', 'outlook.com',
-        'office365.com', 'zoom.us', 'salesforce.com', 'stripe.com',
-        'gmail.com', 'yahoo.com', 'irs.gov'
-    ]
-
-    @staticmethod
-    def _levenshtein(a, b):
-        if a == b:
-            return 0
-        if len(a) < len(b):
-            a, b = b, a
-        prev = list(range(len(b) + 1))
-        for i, ca in enumerate(a, 1):
-            curr = [i] + [0] * len(b)
-            for j, cb in enumerate(b, 1):
-                curr[j] = min(
-                    prev[j] + 1,
-                    curr[j - 1] + 1,
-                    prev[j - 1] + (ca != cb)
-                )
-            prev = curr
-        return prev[-1]
-
-    # Generic infrastructure words that show up in countless legitimate
-    # domains (webmail.company.com, support-team.com...) - comparing these
-    # against brand names on their own creates false positives (e.g. "mail"
-    # is edit-distance 1 from "gmail"), so they're excluded as standalone
-    # tokens even though they may still be part of a flagged compound token.
-    GENERIC_INFRA_WORDS = {
-        'mail', 'team', 'help', 'support', 'service', 'secure', 'verify',
-        'account', 'accounts', 'update', 'news', 'info', 'portal', 'login',
-        'admin', 'web', 'site', 'app', 'online', 'alert', 'alerts', 'my',
-        'the', 'get', 'new'
-    }
-
-    def detect_typosquatting(self, domain):
-        """يقارن الدومين (وكل قطعة فيه لحالها) بأشهر البراندات المستهدفة عادةً بالتزوير"""
-        result = {'is_suspicious': False, 'matched_brand': None, 'distance': None}
-        if domain in self.KNOWN_BRAND_DOMAINS:
-            return result
-
-        domain_root = domain.split('.')[0]
-        # Attackers commonly do "brand-word" or "brandword123" - split on
-        # non-alphanumeric characters so "paypa1-secure" is checked as both
-        # "paypa1" and "secure" against each brand, not as one long string
-        # where the added suffix inflates the edit distance past any
-        # reasonable threshold.
-        tokens = [
-            t for t in re.split(r'[^a-z0-9]+', domain_root)
-            if len(t) >= 4 and t not in self.GENERIC_INFRA_WORDS
-        ]
-        if not tokens:
-            tokens = [domain_root]
-
-        best_brand = None
-        best_distance = 999
-        for brand in self.KNOWN_BRAND_DOMAINS:
-            brand_root = brand.split('.')[0]
-            for token in tokens:
-                # Require the token to be close in length to the brand root
-                # too - otherwise a short, coincidentally-close token (e.g.
-                # a 4-letter word that happens to be 1 edit from an unrelated
-                # 5-letter brand) triggers false positives.
-                if abs(len(token) - len(brand_root)) > 1:
-                    continue
-                dist = self._levenshtein(token, brand_root)
-                if dist < best_distance:
-                    best_distance = dist
-                    best_brand = brand
-
-        # A short edit-distance to a well-known brand root (e.g. "paypa1"
-        # vs "paypal" = distance 1) is a strong lookalike-domain signal,
-        # regardless of whether the domain has ever been reported as
-        # malicious anywhere before.
-        if best_brand and 0 < best_distance <= 2:
-            result['is_suspicious'] = True
-            result['matched_brand'] = best_brand
-            result['distance'] = best_distance
-        return result
-
-    def detect_homograph(self, domain):
-        """يكشف الحروف من أبجديات مختلفة (سيريلية/يونانية) تشبه اللاتينية بصرياً"""
-        scripts_found = set()
-        for ch in domain:
-            if ch.isascii():
-                continue
-            code = ord(ch)
-            if 0x0400 <= code <= 0x04FF:
-                scripts_found.add('Cyrillic')
-            elif 0x0370 <= code <= 0x03FF:
-                scripts_found.add('Greek')
-            elif code > 0x2000:
-                scripts_found.add('Other non-Latin')
-        return {
-            'is_suspicious': len(scripts_found) > 0,
-            'scripts_found': list(scripts_found)
-        }
-
-    def check_display_name_spoofing(self, display_name, domain):
-        """لو اسم العرض فيه اسم براند لكن الدومين الفعلي مختلف تماماً"""
-        result = {'is_suspicious': False, 'claimed_brand': None}
-        if not display_name:
-            return result
-        name_lower = display_name.lower()
-        for brand in self.KNOWN_BRAND_DOMAINS:
-            brand_name = brand.split('.')[0]
-            if brand_name in name_lower and brand not in domain and domain not in brand:
-                result['is_suspicious'] = True
-                result['claimed_brand'] = brand
-                break
-        return result
-
-    def parse_raw_headers(self, raw_headers):
-        """يقرأ Authentication-Results (اللي سيرفر البريد الحقيقي حسبها وقت الاستلام) وباقي الهيدرز المهمة"""
-        result = {
-            'provided': bool(raw_headers and raw_headers.strip()),
-            'auth_results': {'spf': None, 'dkim': None, 'dmarc': None},
-            'return_path': None,
-            'reply_to': None,
-            'received_hop_count': 0
-        }
-        if not result['provided']:
-            return result
-
-        auth_match = re.search(r'Authentication-Results:.*', raw_headers, re.IGNORECASE)
-        if auth_match:
-            auth_line = auth_match.group(0)
-            for mech in ['spf', 'dkim', 'dmarc']:
-                m = re.search(mech + r'=(\w+)', auth_line, re.IGNORECASE)
-                if m:
-                    result['auth_results'][mech] = m.group(1).lower()
-
-        rp_match = re.search(r'Return-Path:\s*<?([^\s<>\r\n]+)>?', raw_headers, re.IGNORECASE)
-        if rp_match:
-            result['return_path'] = rp_match.group(1)
-
-        reply_match = re.search(r'Reply-To:\s*.*?<?([^\s<>\r\n]+@[^\s<>\r\n]+)>?', raw_headers, re.IGNORECASE)
-        if reply_match:
-            result['reply_to'] = reply_match.group(1)
-
-        result['received_hop_count'] = len(re.findall(r'^Received:', raw_headers, re.IGNORECASE | re.MULTILINE))
-
-        return result
     
     def api1_otx_domain_check(self, domain):
         """API #1: OTX AlienVault - فحص سمعة الـ Domain"""
@@ -427,12 +236,6 @@ class ComprehensiveEmailAnalyzer:
             'findings': {},
             'risk_assessment': {}
         }
-
-        if not OTX_KEY:
-            api_data['status'] = 'not_configured'
-            api_data['error'] = 'OTX_KEY is not set in .env - this check was skipped'
-            self.report['api_1_otx'] = api_data
-            return api_data
         
         try:
             headers = {'X-OTX-API-KEY': OTX_KEY}
@@ -511,12 +314,6 @@ class ComprehensiveEmailAnalyzer:
         if len(urls) == 0:
             api_data['status'] = 'no_urls'
             api_data['message'] = 'No URLs found in email body'
-            self.report['api_2_virustotal'] = api_data
-            return api_data
-
-        if not VIRUSTOTAL_KEY:
-            api_data['status'] = 'not_configured'
-            api_data['error'] = 'VIRUSTOTAL_KEY is not set in .env - this check was skipped'
             self.report['api_2_virustotal'] = api_data
             return api_data
         
@@ -625,42 +422,25 @@ class ComprehensiveEmailAnalyzer:
             'domain': domain,
             'checks': {}
         }
-
-        if not MXTOOLBOX_KEY:
-            api_data['status'] = 'not_configured'
-            api_data['error'] = 'MXTOOLBOX_KEY is not set in .env - this check was skipped'
-            self.report['api_3_mxtoolbox'] = api_data
-            return api_data
         
         try:
-            # MXToolbox's real Lookup API is path-based, e.g.
-            #   GET https://mxtoolbox.com/api/v1/lookup/{command}/{argument}
-            # authenticated with an "Authorization" header carrying the raw
-            # key (no query-string apikey, no "Bearer" prefix). The response
-            # is a report object with Passed / Failed / Warnings / Errors
-            # arrays rather than a simple {status: "valid"} field.
-            base_url = 'https://mxtoolbox.com/api/v1/lookup'
-            headers = {'Authorization': MXTOOLBOX_KEY}
-
-            def run_lookup(command, argument):
-                return requests.get(
-                    base_url + '/' + command + '/' + argument,
-                    headers=headers,
-                    timeout=10
-                )
+            base_url = 'https://api.mxtoolbox.com/api/v1'
             
             # SPF Check
             print("  Checking SPF Records...")
             spf_check = {'check': 'SPF', 'status': 'pending'}
             try:
-                spf_response = run_lookup('spf', domain)
+                spf_response = requests.get(
+                    base_url + '/spf/' + domain,
+                    params={'apikey': MXTOOLBOX_KEY},
+                    timeout=10
+                )
                 
                 if spf_response.status_code == 200:
                     spf_data = spf_response.json()
-                    spf_failed = len(spf_data.get('Failed', [])) > 0 or spf_data.get('IsError', False)
-                    spf_valid = not spf_failed and len(spf_data.get('Passed', [])) > 0
+                    spf_valid = spf_data.get('status') == 'valid'
                     spf_check['status'] = 'completed'
-                    spf_check['result'] = 'valid' if spf_valid else ('failed' if spf_failed else 'no_record')
+                    spf_check['result'] = spf_data.get('status', 'unknown')
                     spf_check['valid'] = spf_valid
                     spf_check['interpretation'] = 'SPF record is VALID - Sender domain can be verified' if spf_valid else 'SPF record is MISSING or INVALID - Domain can be spoofed'
                     
@@ -668,7 +448,7 @@ class ComprehensiveEmailAnalyzer:
                         spf_check['risk_points'] = 15
                         self.risk_score += 15
                     
-                    print("    SPF: " + spf_check['result'])
+                    print("    SPF: " + spf_data.get('status', 'unknown'))
                 else:
                     spf_check['status'] = 'error'
                     spf_check['error'] = 'HTTP ' + str(spf_response.status_code)
@@ -682,14 +462,17 @@ class ComprehensiveEmailAnalyzer:
             print("  Checking DMARC Policy...")
             dmarc_check = {'check': 'DMARC', 'status': 'pending'}
             try:
-                dmarc_response = run_lookup('dmarc', domain)
+                dmarc_response = requests.get(
+                    base_url + '/dmarc/' + domain,
+                    params={'apikey': MXTOOLBOX_KEY},
+                    timeout=10
+                )
                 
                 if dmarc_response.status_code == 200:
                     dmarc_data = dmarc_response.json()
-                    dmarc_failed = len(dmarc_data.get('Failed', [])) > 0 or dmarc_data.get('IsError', False)
-                    dmarc_valid = not dmarc_failed and len(dmarc_data.get('Passed', [])) > 0
+                    dmarc_valid = dmarc_data.get('status') == 'valid'
                     dmarc_check['status'] = 'completed'
-                    dmarc_check['result'] = 'valid' if dmarc_valid else ('failed' if dmarc_failed else 'no_record')
+                    dmarc_check['result'] = dmarc_data.get('status', 'unknown')
                     dmarc_check['valid'] = dmarc_valid
                     dmarc_check['interpretation'] = 'DMARC policy is VALID - Domain has strong authentication' if dmarc_valid else 'DMARC policy is MISSING or WEAK - Domain lacks proper authentication'
                     
@@ -697,7 +480,7 @@ class ComprehensiveEmailAnalyzer:
                         dmarc_check['risk_points'] = 15
                         self.risk_score += 15
                     
-                    print("    DMARC: " + dmarc_check['result'])
+                    print("    DMARC: " + dmarc_data.get('status', 'unknown'))
                 else:
                     dmarc_check['status'] = 'error'
                     dmarc_check['error'] = 'HTTP ' + str(dmarc_response.status_code)
@@ -711,14 +494,18 @@ class ComprehensiveEmailAnalyzer:
             print("  Checking MX Records...")
             mx_check = {'check': 'MX Records', 'status': 'pending'}
             try:
-                mx_response = run_lookup('mx', domain)
+                mx_response = requests.get(
+                    base_url + '/mxlookup/' + domain,
+                    params={'apikey': MXTOOLBOX_KEY},
+                    timeout=10
+                )
                 
                 if mx_response.status_code == 200:
                     mx_data = mx_response.json()
-                    mx_records = mx_data.get('Passed', [])
+                    mx_records = mx_data.get('result', [])
                     mx_check['status'] = 'completed'
                     mx_check['records_found'] = len(mx_records)
-                    mx_check['records'] = [r.get('Name') or r.get('Info') for r in mx_records[:3]]
+                    mx_check['records'] = mx_records[:3] if mx_records else []
                     mx_check['interpretation'] = str(len(mx_records)) + ' MX record(s) found - Domain can receive emails' if mx_records else 'NO MX RECORDS - Domain cannot receive legitimate emails'
                     
                     if len(mx_records) == 0:
@@ -822,94 +609,6 @@ class ComprehensiveEmailAnalyzer:
             'severity': 'HIGH' if pattern_risk > 15 else 'MEDIUM' if pattern_risk > 0 else 'NONE'
         }
     
-    def run_advanced_checks(self, domain, display_name, sender_full, raw_headers):
-        """فحوصات إضافية لا تعتمد على قواعد بيانات تهديدات معروفة سلفاً - بتشتغل حتى على دومين جديد بالكامل"""
-        checks = {}
-
-        typo = self.detect_typosquatting(domain)
-        checks['typosquatting'] = typo
-        if typo['is_suspicious']:
-            checks['typosquatting']['risk_points'] = 35
-            self.risk_score += 35
-
-        homograph = self.detect_homograph(domain)
-        checks['homograph'] = homograph
-        if homograph['is_suspicious']:
-            checks['homograph']['risk_points'] = 30
-            self.risk_score += 30
-
-        dn_spoof = self.check_display_name_spoofing(display_name, domain)
-        checks['display_name_spoofing'] = dn_spoof
-        if dn_spoof['is_suspicious']:
-            checks['display_name_spoofing']['risk_points'] = 25
-            self.risk_score += 25
-
-        headers = self.parse_raw_headers(raw_headers)
-        checks['headers'] = headers
-
-        if headers['provided']:
-            for mech in ['spf', 'dkim', 'dmarc']:
-                result = headers['auth_results'].get(mech)
-                if result and result not in ('pass',):
-                    checks.setdefault('auth_failures', []).append(mech.upper() + ' = ' + result + ' (per Authentication-Results header)')
-                    self.risk_score += 15
-
-            if headers['reply_to']:
-                reply_domain = headers['reply_to'].split('@')[-1].lower() if '@' in headers['reply_to'] else ''
-                if reply_domain and reply_domain != domain:
-                    checks['reply_to_mismatch'] = {
-                        'is_suspicious': True,
-                        'reply_to_domain': reply_domain,
-                        'sender_domain': domain
-                    }
-                    self.risk_score += 20
-
-        self.report['advanced_checks'] = checks
-        return checks
-
-    def _collect_warnings(self):
-        """يجمع كل أسباب الخطورة من كل الفحوصات بقائمة نصية واحدة تستخدمها الواجهة الأمامية"""
-        warnings = []
-
-        otx = self.report.get('api_1_otx', {})
-        warnings.extend(otx.get('risk_assessment', {}).get('reasons', []))
-
-        vt = self.report.get('api_2_virustotal', {})
-        for url_analysis in vt.get('urls_analysis', []):
-            threat_level = url_analysis.get('threat_level')
-            if threat_level in ('MALICIOUS', 'SUSPICIOUS'):
-                warnings.append('URL "' + url_analysis.get('url', '') + '" flagged as ' + threat_level + ' by VirusTotal')
-
-        mx = self.report.get('api_3_mxtoolbox', {})
-        for failure in mx.get('health_failures', []):
-            warnings.append('Email authentication issue: ' + failure)
-
-        patterns = self.report.get('pattern_analysis', {}).get('patterns_found', {})
-        for keyword in patterns.get('urgency_keywords', []):
-            warnings.append('Urgency/pressure language detected: "' + keyword + '"')
-        for greeting in patterns.get('generic_greetings', []):
-            warnings.append('Generic greeting detected: "' + greeting + '"')
-        for error in patterns.get('grammar_errors', []):
-            warnings.append('Possible grammar/spelling red flag: "' + error + '"')
-
-        adv = self.report.get('advanced_checks', {})
-        typo = adv.get('typosquatting', {})
-        if typo.get('is_suspicious'):
-            warnings.append('Domain "' + self.report.get('email_info', {}).get('domain', '') + '" closely resembles known brand "' + typo['matched_brand'] + '" (possible typosquatting)')
-        homograph = adv.get('homograph', {})
-        if homograph.get('is_suspicious'):
-            warnings.append('Domain contains lookalike characters from: ' + ', '.join(homograph['scripts_found']))
-        dn_spoof = adv.get('display_name_spoofing', {})
-        if dn_spoof.get('is_suspicious'):
-            warnings.append('Display name claims to be "' + dn_spoof['claimed_brand'] + '" but the actual email domain does not match')
-        for failure in adv.get('auth_failures', []):
-            warnings.append('Header authentication failed: ' + failure)
-        reply_mismatch = adv.get('reply_to_mismatch', {})
-        if reply_mismatch.get('is_suspicious'):
-            warnings.append('Reply-To domain "' + reply_mismatch['reply_to_domain'] + '" differs from sender domain "' + reply_mismatch['sender_domain'] + '" (common BEC pattern)')
-
-        return warnings
-
     def generate_assessment(self, sender, subject, body):
         """إنشاء تقييم شامل"""
         self.risk_score = min(max(self.risk_score, 0), 100)
@@ -964,22 +663,6 @@ class ComprehensiveEmailAnalyzer:
             recommendations.append('Normal email security practices apply')
         
         self.report['recommendations'] = recommendations
-
-        # ---- Fields the frontend (script.js -> displayEmailAnalysis) actually
-        # reads. These are flattened/simplified views of the detailed report
-        # above, kept in sync with it so the UI never sees undefined fields.
-        warnings = self._collect_warnings()
-        patterns_found_count = sum(
-            len(v) for v in self.report.get('pattern_analysis', {}).get('patterns_found', {}).values()
-        )
-
-        self.report['risk_level'] = risk_level
-        self.report['warnings'] = warnings
-        self.report['details'] = {
-            'sender': sender,
-            'patterns_found': patterns_found_count,
-            'risk_score': self.risk_score
-        }
     
     def _interpret_reputation(self, reputation):
         if reputation < -50:
@@ -1015,23 +698,15 @@ class ComprehensiveEmailAnalyzer:
         }
         return decisions.get(risk_level, 'Unknown')
     
-    def analyze(self, sender, subject, body, raw_headers=None):
+    def analyze(self, sender, subject, body):
         """تحليل شامل للبريل"""
         print("\n" + "="*70)
         print("[CyberTrain] COMPREHENSIVE EMAIL SECURITY ANALYSIS")
         print("="*70)
         
-        # Step 1: Analyze sender (also extracts display name if given as
-        # "Display Name <email@domain>")
+        # Step 1: Analyze sender
         domain = self.analyze_sender_email(sender)
         if not domain:
-            self.report['risk_level'] = 'LOW'
-            self.report['warnings'] = ['Could not analyze: sender email format is invalid']
-            self.report['details'] = {
-                'sender': sender,
-                'patterns_found': 0,
-                'risk_score': 0
-            }
             return self.report
         
         # Step 2: OTX Domain Check
@@ -1049,16 +724,8 @@ class ComprehensiveEmailAnalyzer:
         
         # Step 5: Pattern Detection
         self.detect_patterns(subject, body)
-
-        # Step 6: Advanced checks that don't depend on any external threat
-        # database - typosquatting, homograph domains, display-name spoofing,
-        # and (if raw headers were pasted) real Authentication-Results /
-        # Reply-To mismatch. These catch brand-new "zero-day" spoofing
-        # domains that OTX/VirusTotal have simply never seen before.
-        display_name = self.report.get('email_info', {}).get('display_name')
-        self.run_advanced_checks(domain, display_name, sender, raw_headers)
         
-        # Step 7: Generate Assessment
+        # Step 6: Generate Assessment
         self.generate_assessment(sender, subject, body)
         
         print("\n" + "="*70)
@@ -1076,44 +743,29 @@ class ComprehensiveEmailAnalyzer:
 
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
-    if 'user_id' not in session and 'admin' not in session:
-        return jsonify({
-            'error': 'unauthorized',
-            'message': 'Please login first'
-        }), 401
-
-    data = request.json or {}
+    data = request.json
     sender = data.get('email', '')
     subject = data.get('subject', '')
     body = data.get('body', '')
-    raw_headers = data.get('raw_headers', '')
-
-    if not sender or not subject or not body:
-        return jsonify({
-            'error': 'missing_fields',
-            'message': 'Sender, subject and body are all required'
-        }), 400
 
     try:
         analyzer = ComprehensiveEmailAnalyzer()
-        report = analyzer.analyze(sender, subject, body, raw_headers)
+        report = analyzer.analyze(sender, subject, body)
 
-        # Log the check so admins can see who checked what, and how risky it was.
-        db = get_db()
-        db.execute(
-            'INSERT INTO email_checks (user_id, performed_by, sender, subject, risk_level, risk_score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (
-                session.get('user_id'),
-                'admin' if 'admin' in session and 'user_id' not in session else session.get('username', 'unknown'),
-                sender,
-                subject,
-                report.get('risk_level'),
-                report.get('details', {}).get('risk_score'),
-                datetime.now()
-            )
-        )
-        db.commit()
-        db.close()
+        # حفظ نتيجة الفحص مربوطة بالموظف (لو مسجل دخول) عشان تظهر بلوحة الأدمن
+        if 'user_id' in session:
+            try:
+                risk_level = report.get('overall_assessment', {}).get('risk_level', 'UNKNOWN')
+                risk_score = report.get('overall_assessment', {}).get('risk_score', 0)
+                db = get_db()
+                db.execute(
+                    'INSERT INTO email_checks (user_id, sender, risk_level, risk_score, created_at) VALUES (?, ?, ?, ?, ?)',
+                    (session['user_id'], sender, risk_level, risk_score, datetime.now())
+                )
+                db.commit()
+                db.close()
+            except Exception as log_err:
+                print("[WARN] Could not log email check: " + str(log_err))
 
         return jsonify(report)
     except Exception as e:
@@ -1156,35 +808,41 @@ def get_user_results():
 def admin_dashboard():
     if 'admin' not in session:
         return jsonify({'success': False}), 401
-    
+
     db = get_db()
 
-    # Every registered employee, whether or not they've taken an exam yet.
-    users = db.execute('SELECT id, username, created_at FROM users ORDER BY created_at DESC').fetchall()
+    # كل المستخدمين مع حالة التعهد الرقمي
+    users = db.execute('''
+        SELECT id, username, created_at, pledge_accepted, pledge_accepted_at
+        FROM users
+        ORDER BY created_at DESC
+    ''').fetchall()
 
-    results = db.execute('''
+    # نتائج الامتحانات (كما كانت)
+    exam_results = db.execute('''
         SELECT u.username, e.exam_type, e.level, e.score, e.total, e.created_at
         FROM exam_results e
         JOIN users u ON e.user_id = u.id
         ORDER BY e.created_at DESC
     ''').fetchall()
 
-    # Every email an employee (or admin) has checked, with the resulting risk
-    # level - so if a real incident happens, you can see whether the
-    # employee checked the email first and what the tool told them.
+    # نتائج فحص الإيميل لكل موظف
     email_checks = db.execute('''
-        SELECT ec.performed_by, ec.sender, ec.subject, ec.risk_level, ec.risk_score, ec.created_at
-        FROM email_checks ec
-        ORDER BY ec.created_at DESC
+        SELECT u.username, c.sender, c.risk_level, c.risk_score, c.created_at
+        FROM email_checks c
+        JOIN users u ON c.user_id = u.id
+        ORDER BY c.created_at DESC
     ''').fetchall()
 
-    user_count = len(users)
+    user_count = db.execute('SELECT COUNT(*) as count FROM users').fetchone()['count']
+    pledged_count = db.execute('SELECT COUNT(*) as count FROM users WHERE pledge_accepted = 1').fetchone()['count']
     db.close()
-    
+
     return jsonify({
         'total_users': user_count,
+        'pledged_users': pledged_count,
         'users': [dict(row) for row in users],
-        'results': [dict(row) for row in results],
+        'results': [dict(row) for row in exam_results],
         'email_checks': [dict(row) for row in email_checks]
     })
 
@@ -1195,6 +853,4 @@ def logout():
 
 if __name__ == '__main__':
     init_db()
-    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
-    port = int(os.getenv('PORT', 5000))
-    app.run(debug=debug_mode, port=port)
+    app.run(debug=True, port=5000)

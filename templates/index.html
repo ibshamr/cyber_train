@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cyber Train - Security Training Platform</title>
+    <title>CyberTrain - Security Training Platform</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -16,7 +16,7 @@
     <!-- Navigation -->
     <nav class="navbar">
         <div class="nav-container">
-            <h1 class="logo notranslate" translate="no">Cyber Train</h1>
+            <h1 class="logo"> CyberTrain</h1>
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#home" onclick="showPage('home')">Home</a></li>
                 <li><a href="#login" onclick="showPage('login')">Login</a></li>
@@ -32,23 +32,37 @@
             <div class="hero-content">
                 <h2 data-i18n="hero_title">Protect Your Organization from Email Spoofing</h2>
                 <p data-i18n="hero_subtitle">Learn cybersecurity through interactive training and real-world scenarios</p>
-                <button onclick="showPage('register')" class="btn btn-primary" data-i18n="get_started">Get Started</button>
+                <button onclick="showPage('login')" class="btn btn-primary" data-i18n="get_started">Get Started</button>
             </div>
             <div class="hero-animation">
                 <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Shield -->
-                    <path d="M200 40 L280 70 L280 150 C280 210 245 250 200 270 C155 250 120 210 120 150 L120 70 Z"
-                          fill="#1a1a1a" stroke="#ff4444" stroke-width="3"/>
-                    <path d="M200 40 L280 70 L280 150 C280 210 245 250 200 270 C155 250 120 210 120 150 L120 70 Z"
-                          fill="none" stroke="#ff4444" stroke-width="3" class="shield-pulse"/>
-                    <!-- Checkmark -->
-                    <path d="M165 150 L190 175 L235 120" fill="none" stroke="#00ff88" stroke-width="8"
-                          stroke-linecap="round" stroke-linejoin="round" class="shield-check"/>
+                    <!-- Computer -->
+                    <rect x="100" y="80" width="200" height="140" fill="none" stroke="#ff4444" stroke-width="2" rx="10"/>
+                    <rect x="110" y="90" width="180" height="110" fill="#1a1a1a" stroke="#ff4444" stroke-width="2"/>
+                    <rect x="130" y="220" width="140" height="10" fill="#ff4444"/>
+                    
+                    <!-- Keyboard -->
+                    <g id="keyboard">
+                        <rect x="100" y="240" width="200" height="30" fill="#222" stroke="#ff4444" stroke-width="2" rx="5"/>
+                        <circle class="key" cx="120" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="140" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="160" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="180" cy="255" r="4" fill="#ff4444"/>
+                        <circle class="key" cx="200" cy="255" r="4" fill="#ff4444"/>
+                    </g>
 
-                    <!-- Floating labels -->
-                    <text x="30" y="90" font-size="14" fill="#ff4444" class="float-text">Phishing</text>
-                    <text x="300" y="130" font-size="14" fill="#ff4444" class="float-text">Spoofing</text>
-                    <text x="20" y="220" font-size="14" fill="#ff4444" class="float-text">Threats</text>
+                    <!-- Stick Man -->
+                    <circle cx="50" cy="100" r="12" stroke="#00ff88" stroke-width="2" fill="none"/>
+                    <line x1="50" y1="112" x2="50" y2="150" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="125" x2="30" y2="140" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="125" x2="70" y2="140" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="150" x2="35" y2="180" stroke="#00ff88" stroke-width="2"/>
+                    <line x1="50" y1="150" x2="65" y2="180" stroke="#00ff88" stroke-width="2"/>
+
+                    <!-- Floating text -->
+                    <text x="250" y="130" font-size="14" fill="#ff4444" class="float-text">Phishing</text>
+                    <text x="280" y="160" font-size="14" fill="#ff4444" class="float-text">Spoofing</text>
+                    <text x="240" y="190" font-size="14" fill="#ff4444" class="float-text">Threats</text>
                 </svg>
             </div>
         </div>
@@ -83,6 +97,7 @@
                     <input type="password" id="loginPassword" placeholder="Password" required data-i18n-placeholder="password">
                     <button type="submit" class="btn btn-primary" data-i18n="login_button">Login</button>
                 </form>
+                <p data-i18n="no_account">Don't have an account? <a href="#" onclick="showPage('register')">Register here</a></p>
             </div>
         </div>
     </div>
@@ -103,6 +118,31 @@
     </div>
 
     <!-- Dashboard Page -->
+    <div id="pledge" class="page">
+        <div class="auth-container">
+            <h2>Employee Security Pledge</h2>
+            <div class="pledge-box" style="background:#1f1f1f; border:1px solid #ff4444; border-radius:6px; padding:1.5rem; margin-bottom:1.5rem; text-align:right; line-height:1.8; color:#ddd;">
+                <p style="margin-bottom:1rem;">
+                    أتعهد أنا الموظف المسجّل بهذا الحساب، بأن أقوم باستخدام أداة فحص التصيّد الاحتيالي
+                    (Email Spoofing Checker) الخاصة بمنصة CyberTrain للتحقق من <strong>كل بريد إلكتروني مشبوه</strong>
+                    يصلني قبل التعامل معه (فتح روابط، مرفقات، أو الرد عليه)، وأن أبلغ فريق تقنية المعلومات
+                    فور اكتشاف أي بريد يصنَّف بمستوى خطورة "High" أو "Critical".
+                </p>
+                <p>
+                    أدرك أن هذا التعهد جزء من سياسة الأمن السيبراني للشركة، وأن الالتزام به يساهم في حماية
+                    بياناتي وبيانات المؤسسة من هجمات التصيّد الاحتيالي.
+                </p>
+            </div>
+            <label style="display:flex; align-items:center; gap:0.6rem; margin-bottom:1.5rem; cursor:pointer;">
+                <input type="checkbox" id="pledgeCheckbox" style="width:18px; height:18px;">
+                <span>أوافق على هذا التعهد وألتزم باستخدام أداة الفحص لكل بريد يصلني</span>
+            </label>
+            <button onclick="submitPledge()" class="btn btn-primary" id="pledgeSubmitBtn" disabled>
+                أوافق وأتابع
+            </button>
+        </div>
+    </div>
+
     <div id="dashboard" class="page">
         <div class="dashboard-container">
             <h2 data-i18n="welcome">Welcome, <span id="userDisplay">User</span>!</h2>
@@ -120,16 +160,13 @@
                 <h3 data-i18n="email_analysis">Email Analysis Tool</h3>
                 <div class="tool-box">
                     <label data-i18n="sender_email">Sender Email:</label>
-                    <input type="text" id="senderEmail" data-i18n-placeholder="placeholder_sender" placeholder='user@company.com or "Display Name" <user@company.com>'>
+                    <input type="email" id="senderEmail" placeholder="user@company.com">
                     
                     <label data-i18n="email_subject">Subject:</label>
                     <input type="text" id="emailSubject" placeholder="Email subject">
                     
                     <label data-i18n="email_body">Email Body:</label>
                     <textarea id="emailBody" placeholder="Paste email content here..."></textarea>
-
-                    <label data-i18n="raw_headers_label">Raw Email Headers (optional, but recommended):</label>
-                    <textarea id="emailRawHeaders" data-i18n-placeholder="raw_headers_placeholder" placeholder="Paste full raw headers here for real SPF/DKIM/DMARC results, e.g. from Gmail: Show original -> copy everything above the message body" style="min-height: 100px; font-size: 0.85rem;"></textarea>
                     
                     <button onclick="analyzeEmail()" class="btn btn-primary" data-i18n="analyze">Analyze</button>
                 </div>
@@ -209,8 +246,8 @@
             <div class="exam-content">
                 <h3 id="questionText"></h3>
                 <div id="answersContainer" class="answers-container"></div>
-                <button id="nextQuestionBtn" onclick="nextQuestion()" class="btn btn-primary" data-i18n="next">Next</button>
-                <button id="finishExamBtn" onclick="finishExam()" class="btn btn-danger" data-i18n="finish" style="display:none;">Finish Exam</button>
+                <button onclick="nextQuestion()" class="btn btn-primary" data-i18n="next">Next</button>
+                <button onclick="finishExam()" class="btn btn-danger" data-i18n="finish">Finish Exam</button>
             </div>
         </div>
     </div>
@@ -236,11 +273,8 @@
             </div>
             
             <!-- Admin Tabs Navigation -->
-            <div class="admin-tabs-nav" style="display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 2px solid #ff4444; padding-bottom: 1rem; flex-wrap: wrap;">
+            <div class="admin-tabs-nav" style="display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 2px solid #ff4444; padding-bottom: 1rem;">
                 <button onclick="switchAdminTab('dashboard')" class="admin-tab-btn active" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #00ff88; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Dashboard</button>
-                <button onclick="switchAdminTab('users')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Employees</button>
-                <button onclick="switchAdminTab('email-log')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Email Check Log</button>
-                <button onclick="switchAdminTab('email-checker')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Email Checker</button>
                 <button onclick="switchAdminTab('exams')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Exams</button>
                 <button onclick="switchAdminTab('training')" class="admin-tab-btn" style="padding: 0.8rem 1.5rem; background: none; border: none; color: #fff; font-size: 1rem; cursor: pointer; font-weight: bold; transition: 0.3s;"> Training</button>
             </div>
@@ -252,7 +286,41 @@
                         <h3 id="totalUsers">0</h3>
                         <p data-i18n="total_users">Total Users</p>
                     </div>
+                    <div class="stat-card">
+                        <h3 id="pledgedUsers">0</h3>
+                        <p>Pledge Accepted</p>
+                    </div>
                 </div>
+
+                <h3 style="margin-top: 2rem;">Users &amp; Pledge Status</h3>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Registered</th>
+                            <th>Pledge Status</th>
+                            <th>Pledge Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody">
+                    </tbody>
+                </table>
+
+                <h3 style="margin-top: 2rem;">Email Checks by Employee</h3>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Sender Checked</th>
+                            <th>Risk Level</th>
+                            <th>Risk Score</th>
+                            <th data-i18n="date">Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="emailChecksTableBody">
+                    </tbody>
+                </table>
+
                 <h3 style="margin-top: 2rem;">Recent Exam Results</h3>
                 <table class="results-table">
                     <thead>
@@ -268,60 +336,6 @@
                     </tbody>
                 </table>
             </div>
-
-            <!-- Employees Tab Content (every registered employee, even with zero exams) -->
-            <div id="tab-users" class="admin-tab-content" style="display: none;">
-                <h3>All Registered Employees</h3>
-                <table class="results-table">
-                    <thead>
-                        <tr>
-                            <th data-i18n="username">Username</th>
-                            <th>Registered</th>
-                            <th>Emails Checked</th>
-                        </tr>
-                    </thead>
-                    <tbody id="usersTableBody"></tbody>
-                </table>
-            </div>
-
-            <!-- Email Check Log Tab Content -->
-            <div id="tab-email-log" class="admin-tab-content" style="display: none;">
-                <h3>Every Email Check Performed</h3>
-                <p style="color: #aaa; margin-bottom: 1rem;">Use this to confirm whether an employee checked a suspicious email before acting on it, and what risk level the tool gave them.</p>
-                <table class="results-table">
-                    <thead>
-                        <tr>
-                            <th data-i18n="username">Employee</th>
-                            <th>Sender</th>
-                            <th data-i18n="email_subject">Subject</th>
-                            <th data-i18n="risk_level">Risk Level</th>
-                            <th data-i18n="date">Date</th>
-                        </tr>
-                    </thead>
-                    <tbody id="emailLogTableBody"></tbody>
-                </table>
-            </div>
-
-            <!-- Admin's own Email Checker Tab Content -->
-            <div id="tab-email-checker" class="admin-tab-content" style="display: none;">
-                <h3 data-i18n="email_analysis">Email Analysis Tool</h3>
-                <div class="tool-box">
-                    <label data-i18n="sender_email">Sender Email:</label>
-                    <input type="text" id="adminSenderEmail" data-i18n-placeholder="placeholder_sender" placeholder='user@company.com or "Display Name" <user@company.com>'>
-
-                    <label data-i18n="email_subject">Subject:</label>
-                    <input type="text" id="adminEmailSubject" placeholder="Email subject">
-
-                    <label data-i18n="email_body">Email Body:</label>
-                    <textarea id="adminEmailBody" placeholder="Paste email content here..."></textarea>
-
-                    <label data-i18n="raw_headers_label">Raw Email Headers (optional, but recommended):</label>
-                    <textarea id="adminEmailRawHeaders" data-i18n-placeholder="raw_headers_placeholder" placeholder="Paste full raw headers here for real SPF/DKIM/DMARC results" style="min-height: 100px; font-size: 0.85rem;"></textarea>
-
-                    <button onclick="adminAnalyzeEmail()" class="btn btn-primary" data-i18n="analyze">Analyze</button>
-                </div>
-                <div id="adminEmailResult" class="result-box hidden"></div>
-            </div>
             
             <!-- Exams Tab Content -->
             <div id="tab-exams" class="admin-tab-content" style="display: none;">
@@ -336,25 +350,6 @@
             </div>
         </div>
     </div>
-
-    <footer style="text-align: center; padding: 2rem; color: #666; border-top: 1px solid #333; margin-top: 2rem;">
-        <p data-i18n="developed_by">Developed by Ibrahim Shamroukh</p>
-    </footer>
-
-    <!-- Google Translate: auto-translates ALL page content (including exam
-         questions, training text, and anything added in the future) into
-         Arabic. Hidden visually with CSS - our own EN/AR buttons in
-         translations.js drive it programmatically. -->
-    <div id="google_translate_element"></div>
-    <script>
-        function googleTranslateElementInit() {
-            new google.translate.TranslateElement(
-                { pageLanguage: 'en', includedLanguages: 'ar,en', autoDisplay: false },
-                'google_translate_element'
-            );
-        }
-    </script>
-    <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 
     <script src="{{ url_for('static', filename='translations.js') }}"></script>
     <script src="{{ url_for('static', filename='data.js') }}"></script>
