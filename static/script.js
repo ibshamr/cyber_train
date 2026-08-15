@@ -271,39 +271,73 @@ async function analyzeEmail() {
     }
 }
 
-function displayEmailAnalysis(analysis) {
+function displayEmailAnalysis(report) {
     const resultBox = document.getElementById('emailResult');
-    
-    const riskClass = `risk-${analysis.risk_level.toLowerCase()}`;
-    let warningsHTML = '';
-    
-    if (analysis.warnings.length > 0) {
-        warningsHTML = '<ul style="margin-left: 20px;">';
-        analysis.warnings.forEach(warning => {
-            warningsHTML += `<li>${warning}</li>`;
-        });
-        warningsHTML += '</ul>';
-    } else {
-        warningsHTML = `<p>No suspicious patterns detected</p>`;
+
+    if (!report || !report.overall_assessment) {
+        resultBox.innerHTML = `<p style="color:#ff4444;">Error: unexpected response from server. ${report && report.message ? report.message : ''}</p>`;
+        resultBox.classList.remove('hidden');
+        return;
     }
-    
+
+    const assessment = report.overall_assessment;
+    const riskLevel = assessment.risk_level || 'UNKNOWN';
+    const riskScore = assessment.risk_score ?? 0;
+    const riskClass = `risk-${riskLevel.toLowerCase()}`;
+
+    let recommendationsHTML = '';
+    if (report.recommendations && report.recommendations.length > 0) {
+        recommendationsHTML = '<ul style="margin-left: 20px;">';
+        report.recommendations.forEach(rec => {
+            recommendationsHTML += `<li>${rec}</li>`;
+        });
+        recommendationsHTML += '</ul>';
+    } else {
+        recommendationsHTML = `<p>No specific recommendations</p>`;
+    }
+
+    const emailInfo = report.email_info || {};
+    const otx = report.api_1_otx || {};
+    const vt = report.api_2_virustotal || {};
+    const mxt = report.api_3_mxtoolbox || {};
+    const patterns = report.pattern_analysis || {};
+
     resultBox.innerHTML = `
-        <h4>Risk Analysis</h4>
+        <h4>Comprehensive Email Security Report</h4>
         <div class="result-detail">
-            <strong>Risk Level:</strong> <span class="${riskClass}">${analysis.risk_level.toUpperCase()}</span>
+            <strong>Risk Level:</strong> <span class="${riskClass}">${riskLevel}</span>
+            (${riskScore}/100)
         </div>
         <div class="result-detail">
-            <strong>Warnings:</strong>
-            ${warningsHTML}
+            <strong>Decision:</strong> ${assessment.decision || ''}
         </div>
         <div class="result-detail">
-            <strong>Details:</strong>
-            <p>Sender: ${analysis.details.sender}</p>
-            <p>Patterns Found: ${analysis.details.patterns_found}</p>
-            <p>Risk Score: ${analysis.details.risk_score}/100</p>
+            <strong>Summary:</strong> ${assessment.summary || ''}
+        </div>
+        <div class="result-detail">
+            <strong>Sender:</strong> ${emailInfo.full_email || 'N/A'} (Domain: ${emailInfo.domain || 'N/A'})
+        </div>
+        <div class="result-detail">
+            <strong>OTX AlienVault:</strong> ${otx.status || 'N/A'}
+            ${otx.findings ? ' - ' + (otx.findings.reputation_interpretation || '') : ''}
+        </div>
+        <div class="result-detail">
+            <strong>VirusTotal:</strong> ${vt.status || 'N/A'}
+            ${vt.urls_found !== undefined ? ' - URLs found: ' + vt.urls_found : ''}
+        </div>
+        <div class="result-detail">
+            <strong>Email Authentication (MXToolbox):</strong> ${mxt.status || 'N/A'}
+            ${mxt.email_health_score !== undefined ? ' - Health Score: ' + mxt.email_health_score + '/100' : ''}
+        </div>
+        <div class="result-detail">
+            <strong>Content Patterns:</strong> ${patterns.severity || 'N/A'}
+        </div>
+        <div class="result-detail">
+            <strong>Recommendations:</strong>
+            ${recommendationsHTML}
         </div>
     `;
-    
+
     resultBox.classList.remove('hidden');
 }
 
