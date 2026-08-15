@@ -96,6 +96,9 @@ def init_db():
     db.commit()
     db.close()
 
+# تنشئ الجداول فور تحميل الملف (يشتغل مع Gunicorn ومع python app.py على حد سواء)
+init_db()
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -852,5 +855,4 @@ def logout():
     return jsonify({'success': True})
 
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True, port=5000)
