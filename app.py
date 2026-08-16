@@ -9,6 +9,7 @@ import re
 from urllib.parse import urlparse
 import time
 import json
+import whois
 
 load_dotenv()
 
@@ -200,6 +201,7 @@ class ComprehensiveEmailAnalyzer:
             'api_1_otx': {},
             'api_2_virustotal': {},
             'api_3_mxtoolbox': {},
+            'api_4_whois': {},
             'pattern_analysis': {},
             'security_checks': {},
             'overall_assessment': {},
@@ -208,6 +210,13 @@ class ComprehensiveEmailAnalyzer:
     
     def analyze_sender_email(self, sender):
         """تحليل بيانات البريل من المُرسل"""
+        # تنظيف الإيميل من علامات < > ومسافات زائدة، تحسباً للصق رأس بريد كامل
+        # مثال: '"Name" <user@domain.com>' أو 'user@domain.com>' يتحول إلى 'user@domain.com'
+        sender = sender.strip()
+        match = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', sender)
+        if match:
+            sender = match.group(0)
+
         if '@' not in sender:
             self.report['email_info'] = {
                 'status': 'INVALID',
@@ -529,7 +538,24 @@ class ComprehensiveEmailAnalyzer:
                 'dmarc': dmarc_check,
                 'mx_records': mx_check
             }
-            
+
+            # إضافة نقاط الخطورة أيضاً عندما يفشل الاتصال بالـ API نفسه
+            # (عدم القدرة على التحقق = مؤشر خطر بحد ذاته، ويجب ألا يُتجاهل بصمت)
+            if spf_check.get('status') == 'error' and 'risk_points' not in spf_check:
+                spf_check['risk_points'] = 15
+                spf_check['interpretation'] = 'Could not verify SPF (lookup failed) - treated as unverifiable/risky'
+                self.risk_score += 15
+
+            if dmarc_check.get('status') == 'error' and 'risk_points' not in dmarc_check:
+                dmarc_check['risk_points'] = 15
+                dmarc_check['interpretation'] = 'Could not verify DMARC (lookup failed) - treated as unverifiable/risky'
+                self.risk_score += 15
+
+            if mx_check.get('status') == 'error' and 'risk_points' not in mx_check:
+                mx_check['risk_points'] = 20
+                mx_check['interpretation'] = 'Could not verify MX records (lookup failed) - treated as unverifiable/risky'
+                self.risk_score += 20
+
             # Email Health Score
             health_score = 100
             failures = []
@@ -553,6 +579,79 @@ class ComprehensiveEmailAnalyzer:
             print("  ERROR: " + str(e))
         
         self.report['api_3_mxtoolbox'] = api_data
+        return api_data
+    
+    def api4_whois_domain_age(self, domain):
+        """API #4: WHOIS - فحص عمر النطاق (يكشف نطاقات اليوم الأول Zero-Day)"""
+        print("\n[API #4] WHOIS - Domain Age Check")
+        print("Domain: " + domain)
+
+        api_data = {
+            'api_name': 'WHOIS',
+            'check_type': 'Domain Registration Age',
+            'status': 'pending',
+            'findings': {},
+            'risk_assessment': {}
+        }
+
+        try:
+            w = whois.whois(domain)
+            creation_date = w.creation_date
+
+            if isinstance(creation_date, list):
+                creation_date = creation_date[0]
+
+            if not creation_date:
+                api_data['status'] = 'unknown'
+                api_data['findings'] = {
+                    'interpretation': 'Could not determine domain age (no creation date returned)'
+                }
+                risk_points = 10
+                api_data['risk_assessment'] = {
+                    'risk_points': risk_points,
+                    'reasons': ['Domain age could not be verified - treated as mildly suspicious'],
+                    'severity': 'LOW'
+                }
+                self.risk_score += risk_points
+            else:
+                age_days = (datetime.now() - creation_date).days
+                risk_points = 0
+                severity = 'LOW'
+                reasons = []
+
+                if age_days < 30:
+                    risk_points = 30
+                    severity = 'CRITICAL'
+                    reasons.append('Domain was registered only ' + str(age_days) + ' days ago')
+                elif age_days < 180:
+                    risk_points = 15
+                    severity = 'MEDIUM'
+                    reasons.append('Domain was registered ' + str(age_days) + ' days ago (under 6 months)')
+                else:
+                    severity = 'NONE'
+                    reasons.append('Domain is ' + str(age_days) + ' days old - established domain')
+
+                api_data['status'] = 'completed'
+                api_data['findings'] = {
+                    'creation_date': str(creation_date),
+                    'age_days': age_days,
+                    'interpretation': reasons[0]
+                }
+                api_data['risk_assessment'] = {
+                    'risk_points': risk_points,
+                    'reasons': reasons,
+                    'severity': severity
+                }
+                self.risk_score += risk_points
+
+                print("  Domain age: " + str(age_days) + " days")
+
+        except Exception as e:
+            api_data['status'] = 'error'
+            api_data['error'] = str(e)
+            print("  ERROR: " + str(e))
+
+        self.report['api_4_whois'] = api_data
         return api_data
     
     def detect_patterns(self, subject, body):
@@ -724,11 +823,14 @@ class ComprehensiveEmailAnalyzer:
         # Step 4: MXToolbox Headers Check
         self.api3_mxtoolbox_headers_check(domain)
         time.sleep(1)
-        
-        # Step 5: Pattern Detection
+
+        # Step 5: WHOIS Domain Age Check
+        self.api4_whois_domain_age(domain)
+
+        # Step 6: Pattern Detection
         self.detect_patterns(subject, body)
         
-        # Step 6: Generate Assessment
+        # Step 7: Generate Assessment
         self.generate_assessment(sender, subject, body)
         
         print("\n" + "="*70)

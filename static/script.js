@@ -300,6 +300,7 @@ function displayEmailAnalysis(report) {
     const otx = report.api_1_otx || {};
     const vt = report.api_2_virustotal || {};
     const mxt = report.api_3_mxtoolbox || {};
+    const whoisInfo = report.api_4_whois || {};
     const patterns = report.pattern_analysis || {};
 
     resultBox.innerHTML = `
@@ -328,6 +329,10 @@ function displayEmailAnalysis(report) {
         <div class="result-detail">
             <strong>Email Authentication (MXToolbox):</strong> ${mxt.status || 'N/A'}
             ${mxt.email_health_score !== undefined ? ' - Health Score: ' + mxt.email_health_score + '/100' : ''}
+        </div>
+        <div class="result-detail">
+            <strong>Domain Age (WHOIS):</strong> ${whoisInfo.status || 'N/A'}
+            ${whoisInfo.findings && whoisInfo.findings.age_days !== undefined ? ' - ' + whoisInfo.findings.age_days + ' days old' : ''}
         </div>
         <div class="result-detail">
             <strong>Content Patterns:</strong> ${patterns.severity || 'N/A'}
